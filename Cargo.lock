@@ -2912,6 +2912,7 @@ dependencies = [
 name = "snippet-manager"
 version = "0.1.0"
 dependencies = [
+ "arboard",
  "eframe",
  "rusqlite",
 ]
