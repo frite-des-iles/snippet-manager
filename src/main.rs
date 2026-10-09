@@ -11,6 +11,7 @@ struct SnippetApp {
     new_description: String,
     selected: Option<i64>,
     show_add_window: bool,
+    add_error: Option<String>,
 }
 
 
@@ -292,10 +293,10 @@ impl eframe::App for SnippetApp {
                             self.new_code.clear();
                             self.new_description.clear();
 
-                            close_requested = false;
+                            close_requested = true;
                         }
                         if ui.button("Annuler").clicked() {
-                            close_requested = false;
+                            close_requested = true;
                         }
                     });
                 });
@@ -319,6 +320,6 @@ fn main() -> eframe::Result {
     eframe::run_native(
         "Snippet Manager",
         options,
-        Box::new(|_cc| Ok(Box::new(SnippetApp { conn, snippets, new_title: String::new(), new_language: String::new(), new_code: String::new(), new_description: String::new(), selected: None, show_add_window: false }))),
+        Box::new(|_cc| Ok(Box::new(SnippetApp { conn, snippets, new_title: String::new(), new_language: String::new(), new_code: String::new(), new_description: String::new(), selected: None, show_add_window: false, add_error: None }))),
     )
 }
