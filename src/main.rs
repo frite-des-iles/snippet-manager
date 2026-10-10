@@ -17,6 +17,7 @@ struct SnippetApp {
     new_language_input: String,
     language_filter: String,
     language_dropdown_open: bool,
+    active_language: Option<String>,
 }
 
 struct Snippet {
@@ -175,9 +176,20 @@ impl eframe::App for SnippetApp {
             ui.horizontal(|ui| {
                 ui.add_space(8.0);
 
-                if ui.selectable_label(true, "Tous").clicked() {}
-                if ui.selectable_label(true, "Rust").clicked() {}
-                if ui.selectable_label(true, "Python").clicked() {}
+                if ui.selectable_label(self.active_language.is_none(), "Tous").clicked() {
+                    self.active_language = None;
+                }
+
+                let mut new_filter: Option<Option<String>> = None;
+                for lang in &self.languages {
+                    let is_active = self.active_language.as_ref() == Some(lang);
+                    if ui.selectable_label(is_active, lang).clicked() {
+                        new_filter = Some(Some(lang.clone()));
+                    }
+                }
+                if let Some(f) = new_filter {
+                    self.active_language = f;
+                }
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.add_space(8.0);
@@ -221,6 +233,12 @@ impl eframe::App for SnippetApp {
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     let mut to_select: Option<i64> = None;
                     for snippet in &self.snippets {
+                        if let Some(filter_lang) = &self.active_language {
+                            if &snippet.language != filter_lang {
+                                continue;
+                            }
+                        }
+
                         let selected = self.selected == Some(snippet.id);
                         let display_title = truncate(&snippet.title, 28);
                         let label = if selected {
@@ -317,7 +335,8 @@ impl eframe::App for SnippetApp {
                     } else {
                         self.new_language.clone()
                     };
-                    let button_response = ui.add_sized([220.0, 24.0], egui::Button::new(button_text));
+                    let button_response =
+                        ui.add_sized([220.0, 24.0], egui::Button::new(button_text));
 
                     if button_response.clicked() {
                         self.language_dropdown_open = !self.language_dropdown_open;
@@ -364,7 +383,9 @@ impl eframe::App for SnippetApp {
                                         .show(ui, |ui| {
                                             let mut found = false;
                                             for lang in &self.languages {
-                                                if filter.is_empty() || lang.to_lowercase().contains(&filter) {
+                                                if filter.is_empty()
+                                                    || lang.to_lowercase().contains(&filter)
+                                                {
                                                     found = true;
                                                     if ui.selectable_label(false, lang).clicked() {
                                                         picked = Some(lang.clone());
@@ -480,6 +501,10 @@ impl eframe::App for SnippetApp {
                     if let Some(name) = to_delete {
                         delete_language(&self.conn, &name).expect("Échec suppression");
                         self.languages = load_languages(&self.conn).expect("Échec reload");
+
+                        if self.active_language.as_ref() == Some(&name) {
+                            self.active_language = None;
+                        }
                     }
 
                     ui.add_space(8.0);
@@ -539,6 +564,7 @@ fn main() -> eframe::Result {
                 language_filter: String::new(),
                 language_dropdown_open: false,
                 languages,
+                active_language: None,
             }))
         }),
     )
