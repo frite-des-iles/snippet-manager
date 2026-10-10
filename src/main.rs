@@ -159,6 +159,7 @@ impl eframe::App for SnippetApp {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.add_space(8.0);
                     if ui.button("+ Nouveau snippet").clicked() {
+                        self.add_error = None;
                         self.show_add_window = true;
                     }
                 });
@@ -177,7 +178,7 @@ impl eframe::App for SnippetApp {
                     for snippet in &self.snippets {
                         let selected = self.selected == Some(snippet.id);
                         let display_title = truncate(&snippet.title, 28);
-                        let label = if self.selected.is_some() {
+                        let label = if selected {
                             format!("▶ {} [{}]", display_title, snippet.language)
                         } else {
                             format!("  {} [{}]", display_title, snippet.language)
@@ -276,26 +277,42 @@ impl eframe::App for SnippetApp {
                     ui.text_edit_singleline(&mut self.new_description);
                     ui.add_space(10.0);
 
+                    if let Some(err) = &self.add_error {
+                        ui.colored_label(egui::Color32::RED, err);
+                        ui.add_space(4.0);
+                    }
+
                     ui.horizontal(|ui| {
                         if ui.button("Ajouter").clicked() {
-                            insert_snippet(
-                                &self.conn,
-                                &self.new_title,
-                                &self.new_language,
-                                &self.new_code,
-                                &self.new_description,
-                            ).expect("Échec de l'insertion");
+                            let title = self.new_title.trim();
+                            let language = self.new_language.trim();
+                            let code = self.new_code.trim();
+                            let description = self.new_description.trim();
 
-                            self.snippets = load_all_snippets(&self.conn).expect("Échec du rechargement");
+                            if title.is_empty() || language.is_empty() || code.is_empty() || description.is_empty() {
+                                self.add_error = Some("Tous les champs sont obligatoires.".to_string());
+                            } else {
+                                insert_snippet(
+                                    &self.conn,
+                                    title,
+                                    language,
+                                    code,
+                                    description,
+                                ).expect("Échec de l'insertion");
 
-                            self.new_title.clear();
-                            self.new_language.clear();
-                            self.new_code.clear();
-                            self.new_description.clear();
+                                self.snippets = load_all_snippets(&self.conn).expect("Échec du rechargement");
 
-                            close_requested = true;
+                                self.new_title.clear();
+                                self.new_language.clear();
+                                self.new_code.clear();
+                                self.new_description.clear();
+
+                                self.add_error = None;
+                                close_requested = true;
+                            }
                         }
                         if ui.button("Annuler").clicked() {
+                            self.add_error = None;
                             close_requested = true;
                         }
                     });
