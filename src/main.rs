@@ -1,6 +1,6 @@
-use eframe::{Frame, egui};
-use rusqlite::{Connection, params, Result};
 use arboard;
+use eframe::{Frame, egui};
+use rusqlite::{Connection, Result, params};
 
 struct SnippetApp {
     conn: Connection,
@@ -12,8 +12,12 @@ struct SnippetApp {
     selected: Option<i64>,
     show_add_window: bool,
     add_error: Option<String>,
+    languages: Vec<String>,
+    show_setting_window: bool,
+    new_language_input: String,
+    language_filter: String,
+    language_dropdown_open: bool,
 }
-
 
 struct Snippet {
     id: i64,
@@ -27,7 +31,6 @@ struct Snippet {
     updated_at: i64,
 }
 
-
 fn truncate(s: &str, max_char: usize) -> String {
     let count = s.chars().count();
     if count <= max_char {
@@ -38,7 +41,6 @@ fn truncate(s: &str, max_char: usize) -> String {
         format!("{}...", truncated)
     }
 }
-
 
 fn load_all_snippets(conn: &Connection) -> Result<Vec<Snippet>> {
     let mut stmt = conn.prepare("SELECT id, title, language, code, description, favorite, use_count, created_at, updated_at FROM snippets")?;
@@ -61,6 +63,16 @@ fn load_all_snippets(conn: &Connection) -> Result<Vec<Snippet>> {
         snippets.push(row?);
     }
     Ok(snippets)
+}
+
+fn load_languages(conn: &Connection) -> Result<Vec<String>> {
+    let mut stmt = conn.prepare("SELECT name FROM languages ORDER BY name")?;
+    let rows = stmt.query_map([], |row| row.get(0))?;
+    let mut lang = Vec::new();
+    for row in rows {
+        lang.push(row?);
+    }
+    Ok(lang)
 }
 
 fn increment_use_count(conn: &Connection, id: i64) -> Result<()> {
@@ -92,21 +104,37 @@ fn init_db(conn: &Connection) -> Result<()> {
         )",
         [],
     )?;
+
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS languages (
+            id      INTEGER PRIMARY KEY AUTOINCREMENT,
+            name    TEXT NOT NULL UNIQUE
+        )",
+        [],
+    )?;
+
+    let count: i64 = conn.query_row("SELECT COUNT(*) FROM languages", [], |r| r.get(0))?;
+    if count == 0 {
+        for lang in ["rust", "python", "java", "javascript", "typescript", "bash"] {
+            conn.execute("INSERT INTO languages (name) VALUES (?1)", params![lang])?;
+        }
+    }
+
     Ok(())
 }
 
-
 fn count_snippets(conn: &Connection) -> Result<i64> {
-    let count: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM snippets",
-        [],
-        |row| row.get(0),
-    )?;
+    let count: i64 = conn.query_row("SELECT COUNT(*) FROM snippets", [], |row| row.get(0))?;
     Ok(count)
 }
 
-
-fn insert_snippet(conn: &Connection, title: &str, language: &str, code: &str, description: &str) -> Result<()> {
+fn insert_snippet(
+    conn: &Connection,
+    title: &str,
+    language: &str,
+    code: &str,
+    description: &str,
+) -> Result<()> {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .expect("Horloge système invalide")
@@ -129,6 +157,16 @@ fn insert_snippet(conn: &Connection, title: &str, language: &str, code: &str, de
     Ok(())
 }
 
+fn insert_language(conn: &Connection, name: &str) -> Result<()> {
+    conn.execute("INSERT INTO languages (name) VALUES (?1)", params![name])?;
+    Ok(())
+}
+
+fn delete_language(conn: &Connection, name: &str) -> Result<()> {
+    conn.execute("DELETE FROM languages WHERE name = ?1", params![name])?;
+    Ok(())
+}
+
 impl eframe::App for SnippetApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut Frame) {
         let mut to_copy: Option<i64> = None;
@@ -143,7 +181,14 @@ impl eframe::App for SnippetApp {
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.add_space(8.0);
-                    ui.add_sized([240.0, 22.0], egui::TextEdit::singleline(&mut String::new()));
+                    if ui.button("⚙").clicked() {
+                        self.show_setting_window = true;
+                    }
+                    ui.add_space(8.0);
+                    ui.add_sized(
+                        [240.0, 22.0],
+                        egui::TextEdit::singleline(&mut String::new()),
+                    );
                     ui.label("🔍");
                 });
             });
@@ -200,22 +245,21 @@ impl eframe::App for SnippetApp {
             if let Some(id) = self.selected {
                 if let Some(snippet) = self.snippets.iter().find(|s| s.id == id) {
                     ui.vertical(|ui| {
-                       ui.horizontal(|ui| {
-                           ui.heading(&snippet.title);
-                           ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                              ui.add_space(8.0);
+                        ui.horizontal(|ui| {
+                            ui.heading(&snippet.title);
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    ui.add_space(8.0);
 
-                               if ui.button("Supprimer").clicked() {
-
-                               }
-                               if ui.button("Éditer").clicked() {
-
-                               }
-                               if ui.button("Copier").clicked() {
-                                   to_copy = Some(snippet.id);
-                               }
-                           });
-                       });
+                                    if ui.button("Supprimer").clicked() {}
+                                    if ui.button("Éditer").clicked() {}
+                                    if ui.button("Copier").clicked() {
+                                        to_copy = Some(snippet.id);
+                                    }
+                                },
+                            );
+                        });
 
                         ui.label(format!("Langage : {}", snippet.language));
                         if let Some(desc) = &snippet.description {
@@ -233,7 +277,7 @@ impl eframe::App for SnippetApp {
                     });
                 } else {
                     ui.centered_and_justified(|ui| {
-                       ui.label("Snippet introuvable");
+                        ui.label("Snippet introuvable");
                     });
                 }
             } else {
@@ -266,7 +310,90 @@ impl eframe::App for SnippetApp {
                     ui.text_edit_singleline(&mut self.new_title);
 
                     ui.label("Langage");
-                    ui.text_edit_singleline(&mut self.new_language);
+
+                    // ── Bouton : toujours affiché ──
+                    let button_text = if self.new_language.is_empty() {
+                        "Choisir un langage...".to_string()
+                    } else {
+                        self.new_language.clone()
+                    };
+                    let button_response = ui.add_sized([220.0, 24.0], egui::Button::new(button_text));
+
+                    if button_response.clicked() {
+                        self.language_dropdown_open = !self.language_dropdown_open;
+                        self.language_filter.clear();
+                    }
+
+                    // ── Animation : 0 = fermé, 1 = ouvert ──
+                    let anim_t = ui.ctx().animate_bool_with_time(
+                        egui::Id::new("lang_dropdown_anim"),
+                        self.language_dropdown_open,
+                        0.15,
+                    );
+
+                    // ── Popup flottant ──
+                    // On dessine tant que l'opacité n'est pas nulle → permet le fade-out.
+                    if anim_t > 0.0 {
+                        let popup_pos = button_response.rect.left_bottom() + egui::vec2(0.0, 2.0);
+
+                        let area_response = egui::Area::new(egui::Id::new("lang_dropdown"))
+                            .fixed_pos(popup_pos)
+                            .order(egui::Order::Foreground)
+                            .interactable(self.language_dropdown_open)
+                            .show(ui.ctx(), |ui| {
+                                egui::Frame::popup(ui.style()).show(ui, |ui| {
+                                    ui.set_opacity(anim_t);
+                                    ui.set_min_width(220.0);
+
+                                    // Champ de recherche
+                                    ui.add(
+                                        egui::TextEdit::singleline(&mut self.language_filter)
+                                            .hint_text("Rechercher...")
+                                            .desired_width(220.0),
+                                    );
+                                    ui.add_space(4.0);
+                                    ui.separator();
+                                    ui.add_space(4.0);
+
+                                    // Liste filtrée
+                                    let filter = self.language_filter.to_lowercase();
+                                    let mut picked: Option<String> = None;
+
+                                    egui::ScrollArea::vertical()
+                                        .max_height(150.0)
+                                        .show(ui, |ui| {
+                                            let mut found = false;
+                                            for lang in &self.languages {
+                                                if filter.is_empty() || lang.to_lowercase().contains(&filter) {
+                                                    found = true;
+                                                    if ui.selectable_label(false, lang).clicked() {
+                                                        picked = Some(lang.clone());
+                                                    }
+                                                }
+                                            }
+                                            if !found {
+                                                ui.weak("Aucun résultat");
+                                            }
+                                        });
+
+                                    if let Some(l) = picked {
+                                        self.new_language = l;
+                                        self.language_filter.clear();
+                                        self.language_dropdown_open = false;
+                                    }
+                                });
+                            });
+
+                        // Fermer au clic ailleurs
+                        if self.language_dropdown_open
+                            && ui.input(|i| i.pointer.any_click())
+                            && !area_response.response.contains_pointer()
+                            && !button_response.hovered()
+                        {
+                            self.language_dropdown_open = false;
+                        }
+                    }
+
                     ui.add_space(6.0);
 
                     ui.label("Code");
@@ -289,18 +416,19 @@ impl eframe::App for SnippetApp {
                             let code = self.new_code.trim();
                             let description = self.new_description.trim();
 
-                            if title.is_empty() || language.is_empty() || code.is_empty() || description.is_empty() {
-                                self.add_error = Some("Tous les champs sont obligatoires.".to_string());
+                            if title.is_empty()
+                                || language.is_empty()
+                                || code.is_empty()
+                                || description.is_empty()
+                            {
+                                self.add_error =
+                                    Some("Tous les champs sont obligatoires.".to_string());
                             } else {
-                                insert_snippet(
-                                    &self.conn,
-                                    title,
-                                    language,
-                                    code,
-                                    description,
-                                ).expect("Échec de l'insertion");
+                                insert_snippet(&self.conn, title, language, code, description)
+                                    .expect("Échec de l'insertion");
 
-                                self.snippets = load_all_snippets(&self.conn).expect("Échec du rechargement");
+                                self.snippets =
+                                    load_all_snippets(&self.conn).expect("Échec du rechargement");
 
                                 self.new_title.clear();
                                 self.new_language.clear();
@@ -323,6 +451,63 @@ impl eframe::App for SnippetApp {
                 self.show_add_window = open;
             }
         }
+
+        if self.show_setting_window {
+            let mut open = true;
+            egui::Window::new("Paramètres")
+                .open(&mut open)
+                .collapsible(false)
+                .resizable(true)
+                .default_size([450.0, 400.0])
+                .show(ui.ctx(), |ui| {
+                    ui.heading("Langages");
+                    ui.add_space(6.0);
+
+                    let mut to_delete: Option<String> = None;
+                    for lang in &self.languages {
+                        ui.horizontal(|ui| {
+                            ui.label(lang);
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    if ui.button("🗑").clicked() {
+                                        to_delete = Some(lang.clone());
+                                    }
+                                },
+                            );
+                        });
+                    }
+                    if let Some(name) = to_delete {
+                        delete_language(&self.conn, &name).expect("Échec suppression");
+                        self.languages = load_languages(&self.conn).expect("Échec reload");
+                    }
+
+                    ui.add_space(8.0);
+                    ui.separator();
+                    ui.add_space(8.0);
+
+                    ui.label("Ajouter un langage");
+                    ui.horizontal(|ui| {
+                        ui.text_edit_singleline(&mut self.new_language_input);
+                        if ui.button("Ajouter").clicked() {
+                            let trimmed = self.new_language_input.trim().to_lowercase();
+                            if !trimmed.is_empty() && !self.languages.contains(&trimmed) {
+                                insert_language(&self.conn, &trimmed).expect("Échec insertion");
+                                self.languages = load_languages(&self.conn).expect("Échec reload");
+                                self.new_language_input.clear();
+                            }
+                        }
+                    });
+
+                    ui.add_space(16.0);
+                    ui.separator();
+                    ui.add_space(8.0);
+
+                    ui.heading("Import / Export");
+                    ui.label("(A venir)");
+                });
+            self.show_setting_window = open;
+        }
     }
 }
 
@@ -332,11 +517,29 @@ fn main() -> eframe::Result {
     init_db(&conn).expect("Impossible de créer la table");
     let count = count_snippets(&conn).expect("Impossible de compter");
     let snippets = load_all_snippets(&conn).expect("Impossible de charger les snippets");
+    let languages = load_languages(&conn).expect("Échec chargement langages");
 
     let options = eframe::NativeOptions::default();
     eframe::run_native(
         "Snippet Manager",
         options,
-        Box::new(|_cc| Ok(Box::new(SnippetApp { conn, snippets, new_title: String::new(), new_language: String::new(), new_code: String::new(), new_description: String::new(), selected: None, show_add_window: false, add_error: None }))),
+        Box::new(|_cc| {
+            Ok(Box::new(SnippetApp {
+                conn,
+                snippets,
+                new_title: String::new(),
+                new_language: String::new(),
+                new_code: String::new(),
+                new_description: String::new(),
+                selected: None,
+                show_add_window: false,
+                add_error: None,
+                show_setting_window: false,
+                new_language_input: String::new(),
+                language_filter: String::new(),
+                language_dropdown_open: false,
+                languages,
+            }))
+        }),
     )
 }
