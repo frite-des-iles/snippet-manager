@@ -18,6 +18,8 @@ struct SnippetApp {
     language_filter: String,
     language_dropdown_open: bool,
     active_language: Option<String>,
+    lang_scroll: f32,
+    lang_scroll_max: f32,
 }
 
 struct Snippet {
@@ -174,23 +176,74 @@ impl eframe::App for SnippetApp {
         egui::Panel::top("top_bar").show(ui, |ui| {
             ui.add_space(6.0);
             ui.horizontal(|ui| {
-                ui.add_space(8.0);
+                let arrow_width = 22.0;
+                let right_width = 320.0;
+                let left_width = (ui.available_width() - right_width - arrow_width * 2.0 - 8.0).max(80.0);
 
-                if ui.selectable_label(self.active_language.is_none(), "Tous").clicked() {
-                    self.active_language = None;
-                }
-
-                let mut new_filter: Option<Option<String>> = None;
-                for lang in &self.languages {
-                    let is_active = self.active_language.as_ref() == Some(lang);
-                    if ui.selectable_label(is_active, lang).clicked() {
-                        new_filter = Some(Some(lang.clone()));
+                // ── Flèche gauche ──
+                let can_scroll_left = self.lang_scroll > 0.0;
+                ui.add_enabled_ui(can_scroll_left, |ui| {
+                    if ui
+                        .add_sized([arrow_width, 24.0], egui::Button::new("◀"))
+                        .clicked()
+                    {
+                        self.lang_scroll = (self.lang_scroll - 150.0).max(0.0);
                     }
-                }
-                if let Some(f) = new_filter {
-                    self.active_language = f;
-                }
+                });
 
+                // ── Zone des langages avec scroll horizontal, scrollbar cachée ──
+                ui.allocate_ui_with_layout(
+                    egui::vec2(left_width, 24.0),
+                    egui::Layout::left_to_right(egui::Align::Center),
+                    |ui| {
+                        let output = egui::ScrollArea::horizontal()
+                            .id_salt("lang_tabs_scroll")
+                            .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+                            .horizontal_scroll_offset(self.lang_scroll)
+                            .show(ui, |ui| {
+                                ui.horizontal(|ui| {
+                                    ui.add_space(4.0);
+
+                                    if ui
+                                        .selectable_label(self.active_language.is_none(), "Tous")
+                                        .clicked()
+                                    {
+                                        self.active_language = None;
+                                    }
+
+                                    let mut new_filter: Option<Option<String>> = None;
+                                    for lang in &self.languages {
+                                        let is_active = self.active_language.as_ref() == Some(lang);
+                                        if ui.selectable_label(is_active, lang).clicked() {
+                                            new_filter = Some(Some(lang.clone()));
+                                        }
+                                    }
+                                    if let Some(f) = new_filter {
+                                        self.active_language = f;
+                                    }
+
+                                    ui.add_space(4.0);
+                                });
+                            });
+
+                        // Calcul du scroll max, à appliquer pour la flèche droite
+                        self.lang_scroll_max =
+                            (output.content_size.x - output.inner_rect.width()).max(0.0);
+                    },
+                );
+
+                // ── Flèche droite ──
+                let can_scroll_right = self.lang_scroll < self.lang_scroll_max;
+                ui.add_enabled_ui(can_scroll_right, |ui| {
+                    if ui
+                        .add_sized([arrow_width, 24.0], egui::Button::new("▶"))
+                        .clicked()
+                    {
+                        self.lang_scroll = (self.lang_scroll + 150.0).min(self.lang_scroll_max);
+                    }
+                });
+
+                // ── Droite : recherche + ⚙ ──
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.add_space(8.0);
                     if ui.button("⚙").clicked() {
@@ -565,6 +618,8 @@ fn main() -> eframe::Result {
                 language_dropdown_open: false,
                 languages,
                 active_language: None,
+                lang_scroll: 0.0,
+                lang_scroll_max: 0.0,
             }))
         }),
     )
