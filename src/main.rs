@@ -12,30 +12,25 @@ struct SnippetApp {
     conn: Connection,
     snippets: Vec<Snippet>,
     languages: Vec<String>,
-
     new_title: String,
     new_language: String,
     new_code: String,
     new_description: String,
     add_error: Option<String>,
     show_add_window: bool,
-
     language_filter: String,
     language_dropdown_open: bool,
-
     selected: Option<i64>,
-
     active_language: Option<String>,
     lang_scroll: f32,
     lang_scroll_max: f32,
     search_query: String,
-
     show_setting_window: bool,
     new_language_input: String,
-
     show_delete_confirm: bool,
     delete_target_id: Option<i64>,
     delete_target_title: String,
+    editing_id: Option<i64>,
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -194,6 +189,28 @@ fn insert_language(conn: &Connection, name: &str) -> Result<()> {
     Ok(())
 }
 
+fn update_snippet(
+    conn: &Connection,
+    id: i64,
+    title: &str,
+    language: &str,
+    code: &str,
+    description: &str,
+) -> Result<()> {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("Horloge invalide.")
+        .as_secs() as i64;
+
+    conn.execute(
+        "UPDATE snippets
+        SET title = ?1, language = ?2, code = ?3, description = ?4, updated_at = ?5
+        WHERE id = ?6",
+        params![title, language, code, description, now, id],
+    )?;
+    Ok(())
+}
+
 fn delete_snippet(conn: &Connection, id: i64) -> Result<()> {
     conn.execute("DELETE FROM snippets WHERE id = ?1", params![id])?;
     Ok(())
@@ -204,11 +221,7 @@ fn delete_language(conn: &Connection, name: &str) -> Result<()> {
     Ok(())
 }
 
-fn snippet_matches(
-    snippet: &Snippet,
-    lang_filter: &Option<String>,
-    query: &str,
-) -> bool {
+fn snippet_matches(snippet: &Snippet, lang_filter: &Option<String>, query: &str) -> bool {
     if let Some(l) = lang_filter {
         if &snippet.language != l {
             return false;
@@ -223,9 +236,9 @@ fn snippet_matches(
     snippet.title.to_lowercase().contains(&q)
         || snippet.code.to_lowercase().contains(&q)
         || snippet
-        .description
-        .as_ref()
-        .map_or(false, |d| d.to_lowercase().contains(&q))
+            .description
+            .as_ref()
+            .map_or(false, |d| d.to_lowercase().contains(&q))
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -234,6 +247,7 @@ fn snippet_matches(
 impl eframe::App for SnippetApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut Frame) {
         let mut to_delete_target: Option<i64> = None;
+        let mut to_edit_target: Option<i64> = None;
         let mut to_copy: Option<i64> = None;
 
         let filtered_count = self
@@ -251,8 +265,8 @@ impl eframe::App for SnippetApp {
             ui.horizontal(|ui| {
                 let arrow_width = 22.0;
                 let right_width = 320.0;
-                let left_width = (ui.available_width() - right_width - arrow_width * 2.0 - 8.0)
-                    .max(80.0);
+                let left_width =
+                    (ui.available_width() - right_width - arrow_width * 2.0 - 8.0).max(80.0);
 
                 let can_scroll_left = self.lang_scroll > 0.0;
                 ui.add_enabled_ui(can_scroll_left, |ui| {
@@ -271,7 +285,7 @@ impl eframe::App for SnippetApp {
                         let output = egui::ScrollArea::horizontal()
                             .id_salt("lang_tabs_scroll")
                             .scroll_bar_visibility(
-                                egui::scroll_area::ScrollBarVisibility::AlwaysHidden
+                                egui::scroll_area::ScrollBarVisibility::AlwaysHidden,
                             )
                             .horizontal_scroll_offset(self.lang_scroll)
                             .show(ui, |ui| {
@@ -287,8 +301,7 @@ impl eframe::App for SnippetApp {
 
                                     let mut new_filter: Option<Option<String>> = None;
                                     for lang in &self.languages {
-                                        let is_active =
-                                            self.active_language.as_ref() == Some(lang);
+                                        let is_active = self.active_language.as_ref() == Some(lang);
                                         if ui.selectable_label(is_active, lang).clicked() {
                                             new_filter = Some(Some(lang.clone()));
                                         }
@@ -312,8 +325,7 @@ impl eframe::App for SnippetApp {
                         .add_sized([arrow_width, 24.0], egui::Button::new("▶"))
                         .clicked()
                     {
-                        self.lang_scroll =
-                            (self.lang_scroll + 150.0).min(self.lang_scroll_max);
+                        self.lang_scroll = (self.lang_scroll + 150.0).min(self.lang_scroll_max);
                     }
                 });
 
@@ -352,6 +364,11 @@ impl eframe::App for SnippetApp {
                     ui.add_space(8.0);
                     if ui.button("+ Nouveau snippet").clicked() {
                         self.add_error = None;
+                        self.editing_id = None;
+                        self.new_title.clear();
+                        self.new_language.clear();
+                        self.new_code.clear();
+                        self.new_description.clear();
                         self.show_add_window = true;
                     }
                 });
@@ -412,7 +429,9 @@ impl eframe::App for SnippetApp {
                                     if ui.button("Supprimer").clicked() {
                                         to_delete_target = Some(snippet.id);
                                     }
-                                    if ui.button("Éditer").clicked() {}
+                                    if ui.button("Éditer").clicked() {
+                                        to_edit_target = Some(snippet.id)
+                                    }
                                     if ui.button("Copier").clicked() {
                                         to_copy = Some(snippet.id);
                                     }
@@ -458,6 +477,18 @@ impl eframe::App for SnippetApp {
             self.show_delete_confirm = true;
         }
 
+        if let Some(id) = to_edit_target {
+            if let Some(s) = self.snippets.iter().find(|s| s.id == id) {
+                self.new_title = s.title.clone();
+                self.new_language = s.language.clone();
+                self.new_code = s.code.clone();
+                self.new_description = s.description.clone().unwrap_or_default();
+            }
+            self.editing_id = Some(id);
+            self.add_error = None;
+            self.show_add_window = true;
+        }
+
         if let Some(id) = to_copy {
             if let Some(snippet) = self.snippets.iter().find(|s| s.id == id) {
                 if let Ok(mut clipboard) = arboard::Clipboard::new() {
@@ -480,8 +511,13 @@ impl eframe::App for SnippetApp {
         if add_anim > 0.0 {
             let mut open = true;
             let mut close_requested = false;
+            let window_title = if self.editing_id.is_some() {
+                "Modifier le snippet"
+            } else {
+                "Nouveau snippet"
+            };
 
-            egui::Window::new("Nouveau snippet")
+            egui::Window::new(window_title)
                 .open(&mut open)
                 .collapsible(false)
                 .resizable(true)
@@ -515,8 +551,7 @@ impl eframe::App for SnippetApp {
                     );
 
                     if anim_t > 0.0 {
-                        let popup_pos =
-                            button_response.rect.left_bottom() + egui::vec2(0.0, 2.0);
+                        let popup_pos = button_response.rect.left_bottom() + egui::vec2(0.0, 2.0);
 
                         let area_response = egui::Area::new(egui::Id::new("lang_dropdown"))
                             .fixed_pos(popup_pos)
@@ -548,10 +583,7 @@ impl eframe::App for SnippetApp {
                                                     || lang.to_lowercase().contains(&filter)
                                                 {
                                                     found = true;
-                                                    if ui
-                                                        .selectable_label(false, lang)
-                                                        .clicked()
-                                                    {
+                                                    if ui.selectable_label(false, lang).clicked() {
                                                         picked = Some(lang.clone());
                                                     }
                                                 }
@@ -594,7 +626,13 @@ impl eframe::App for SnippetApp {
                     }
 
                     ui.horizontal(|ui| {
-                        if ui.button("Ajouter").clicked() {
+                        let action_label = if self.editing_id.is_some() {
+                            "Enregistrer"
+                        } else {
+                            "Ajouter"
+                        };
+
+                        if ui.button(action_label).clicked() {
                             let title = self.new_title.trim();
                             let language = self.new_language.trim();
                             let code = self.new_code.trim();
@@ -608,11 +646,23 @@ impl eframe::App for SnippetApp {
                                 self.add_error =
                                     Some("Tous les champs sont obligatoires.".to_string());
                             } else {
-                                insert_snippet(&self.conn, title, language, code, description)
-                                    .expect("Échec de l'insertion");
+                                if let Some(id) = self.editing_id {
+                                    update_snippet(
+                                        &self.conn,
+                                        id,
+                                        title,
+                                        language,
+                                        code,
+                                        description,
+                                    )
+                                    .expect("Échec de l'édition");
+                                } else {
+                                    insert_snippet(&self.conn, title, language, code, description)
+                                        .expect("Échec de l'insertion");
+                                }
 
-                                self.snippets = load_all_snippets(&self.conn)
-                                    .expect("Échec du rechargement");
+                                self.snippets =
+                                    load_all_snippets(&self.conn).expect("Échec du rechargement");
 
                                 self.new_title.clear();
                                 self.new_language.clear();
@@ -625,6 +675,11 @@ impl eframe::App for SnippetApp {
                         }
                         if ui.button("Annuler").clicked() {
                             self.add_error = None;
+                            self.editing_id = None;
+                            self.new_title.clear();
+                            self.new_language.clear();
+                            self.new_code.clear();
+                            self.new_description.clear();
                             close_requested = true;
                         }
                     });
@@ -695,10 +750,8 @@ impl eframe::App for SnippetApp {
                         if ui.button("Ajouter").clicked() {
                             let trimmed = self.new_language_input.trim().to_lowercase();
                             if !trimmed.is_empty() && !self.languages.contains(&trimmed) {
-                                insert_language(&self.conn, &trimmed)
-                                    .expect("Échec insertion");
-                                self.languages =
-                                    load_languages(&self.conn).expect("Échec reload");
+                                insert_language(&self.conn, &trimmed).expect("Échec insertion");
+                                self.languages = load_languages(&self.conn).expect("Échec reload");
                                 self.new_language_input.clear();
                             }
                         }
@@ -764,8 +817,7 @@ impl eframe::App for SnippetApp {
             if do_delete {
                 if let Some(id) = self.delete_target_id {
                     delete_snippet(&self.conn, id).expect("Échec suppression");
-                    self.snippets =
-                        load_all_snippets(&self.conn).expect("Échec reload");
+                    self.snippets = load_all_snippets(&self.conn).expect("Échec reload");
 
                     if self.selected == Some(id) {
                         self.selected = None;
@@ -797,30 +849,25 @@ fn main() -> eframe::Result {
                 conn,
                 snippets,
                 languages,
-
                 new_title: String::new(),
                 new_language: String::new(),
                 new_code: String::new(),
                 new_description: String::new(),
                 add_error: None,
                 show_add_window: false,
-
                 language_filter: String::new(),
                 language_dropdown_open: false,
-
                 selected: None,
-
                 active_language: None,
                 lang_scroll: 0.0,
                 lang_scroll_max: 0.0,
                 search_query: String::new(),
-
                 show_setting_window: false,
                 new_language_input: String::new(),
-
                 show_delete_confirm: false,
                 delete_target_id: None,
                 delete_target_title: String::new(),
+                editing_id: None,
             }))
         }),
     )
