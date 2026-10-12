@@ -749,11 +749,11 @@ impl eframe::App for SnippetApp {
                     ui.add_space(12.0);
 
                     ui.horizontal(|ui| {
-                        if ui.button("Annuler").clicked() {
-                            cancel = true;
-                        }
                         if ui.button("Supprimer").clicked() {
                             do_delete = true;
+                        }
+                        if ui.button("Annuler").clicked() {
+                            cancel = true;
                         }
                     });
                 });
