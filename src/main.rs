@@ -31,6 +31,8 @@ struct SnippetApp {
     delete_target_id: Option<i64>,
     delete_target_title: String,
     editing_id: Option<i64>,
+    sort_mod: SortMod,
+    sort_dropdown_open: bool,
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -46,6 +48,30 @@ struct Snippet {
     use_count: i64,
     created_at: i64,
     updated_at: i64,
+}
+#[derive(Clone, Copy, PartialEq)]
+enum SortMod {
+    Recent,
+    Alphabetical,
+    MostUsed,
+}
+
+impl SortMod {
+    fn label(&self) -> &'static str {
+        match self {
+            SortMod::Recent => "Plus récents",
+            SortMod::Alphabetical => "Alphabétique",
+            SortMod::MostUsed => "Plus utilisé",
+        }
+    }
+
+    fn all() -> [SortMod; 3] {
+        [
+            SortMod::Recent,
+            SortMod::Alphabetical,
+            SortMod::MostUsed,
+        ]
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -115,6 +141,23 @@ fn increment_use_count(conn: &Connection, id: i64) -> Result<()> {
     )?;
     Ok(())
 }
+
+
+fn toggle_favorite(conn: &Connection, id: i64) -> Result<()> {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("Horloge invalide")
+        .as_secs() as i64;
+
+    conn.execute("
+    UPDATE snippets
+    SET favorite = 1 - favorite, updated_at = ?1
+    WHERE id = ?2
+    ",
+    params![now, id])?;
+    Ok(())
+}
+
 
 fn init_db(conn: &Connection) -> Result<()> {
     conn.execute(
@@ -239,6 +282,21 @@ fn snippet_matches(snippet: &Snippet, lang_filter: &Option<String>, query: &str)
             .description
             .as_ref()
             .map_or(false, |d| d.to_lowercase().contains(&q))
+}
+
+
+fn sort_snippets(snippets: &mut Vec<Snippet>, mode: SortMod) {
+    match mode {
+        SortMod::Recent => {
+            snippets.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        }
+        SortMod::Alphabetical => {
+            snippets.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
+        }
+        SortMod::MostUsed => {
+            snippets.sort_by(|a, b| b.use_count.cmp(&a.use_count));
+        }
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -868,6 +926,8 @@ fn main() -> eframe::Result {
                 delete_target_id: None,
                 delete_target_title: String::new(),
                 editing_id: None,
+                sort_mod: SortMod::Recent,
+                sort_dropdown_open: false,
             }))
         }),
     )
