@@ -66,11 +66,7 @@ impl SortMod {
     }
 
     fn all() -> [SortMod; 3] {
-        [
-            SortMod::Recent,
-            SortMod::Alphabetical,
-            SortMod::MostUsed,
-        ]
+        [SortMod::Recent, SortMod::Alphabetical, SortMod::MostUsed]
     }
 }
 
@@ -142,22 +138,22 @@ fn increment_use_count(conn: &Connection, id: i64) -> Result<()> {
     Ok(())
 }
 
-
 fn toggle_favorite(conn: &Connection, id: i64) -> Result<()> {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .expect("Horloge invalide")
         .as_secs() as i64;
 
-    conn.execute("
+    conn.execute(
+        "
     UPDATE snippets
     SET favorite = 1 - favorite, updated_at = ?1
     WHERE id = ?2
     ",
-    params![now, id])?;
+        params![now, id],
+    )?;
     Ok(())
 }
-
 
 fn init_db(conn: &Connection) -> Result<()> {
     conn.execute(
@@ -284,35 +280,45 @@ fn snippet_matches(snippet: &Snippet, lang_filter: &Option<String>, query: &str)
             .map_or(false, |d| d.to_lowercase().contains(&q))
 }
 
-
-fn sort_snippets(snippets: &mut Vec<Snippet>, mode: SortMod) {
-    match mode {
-        SortMod::Recent => {
-            snippets.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-        }
-        SortMod::Alphabetical => {
-            snippets.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
-        }
-        SortMod::MostUsed => {
-            snippets.sort_by(|a, b| b.use_count.cmp(&a.use_count));
-        }
-    }
-}
-
 // ═══════════════════════════════════════════════════════════════════════
 // INTERFACE
 // ═══════════════════════════════════════════════════════════════════════
 impl eframe::App for SnippetApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut Frame) {
+        let mut to_toggle_favorite: Option<i64> = None;
         let mut to_delete_target: Option<i64> = None;
         let mut to_edit_target: Option<i64> = None;
         let mut to_copy: Option<i64> = None;
 
-        let filtered_count = self
+        let mut visible: Vec<&Snippet> = self
             .snippets
             .iter()
             .filter(|s| snippet_matches(s, &self.active_language, &self.search_query))
-            .count();
+            .collect();
+
+        match self.sort_mod {
+            SortMod::Recent => {
+                visible.sort_by(|a, b| {
+                    b.favorite
+                        .cmp(&a.favorite)
+                        .then(b.created_at.cmp(&a.created_at))
+                });
+            }
+            SortMod::Alphabetical => {
+                visible.sort_by(|a, b| {
+                    b.favorite
+                        .cmp(&a.favorite)
+                        .then(a.title.to_lowercase().cmp(&b.title.to_lowercase()))
+                });
+            }
+            SortMod::MostUsed => visible.sort_by(|a, b| {
+                b.favorite
+                    .cmp(&a.favorite)
+                    .then(b.use_count.cmp(&a.use_count))
+            }),
+        }
+
+        let filtered_count = visible.len();
         let is_filtered = !self.search_query.is_empty() || self.active_language.is_some();
 
         // ═══════════════════════════════════════════════════════════════
@@ -322,14 +328,32 @@ impl eframe::App for SnippetApp {
             ui.add_space(6.0);
             ui.horizontal(|ui| {
                 let arrow_width = 22.0;
-                let right_width = 320.0;
-                let left_width =
-                    (ui.available_width() - right_width - arrow_width * 2.0 - 8.0).max(80.0);
+                let search_width = 180.0;
+                let sort_width = 140.0;
+                let icon_btn_width = 32.0;
+                let magnifier_width = 20.0;
+                let gap = 8.0;
+
+                let right_width = gap
+                    + magnifier_width
+                    + icon_btn_width
+                    + ui.spacing().item_spacing.x
+                    + sort_width
+                    + ui.spacing().item_spacing.x
+                    + search_width
+                    + ui.spacing().item_spacing.x
+                    + gap;
+
+                let left_width = (ui.available_width()
+                    - right_width
+                    - arrow_width * 2.0
+                    - ui.spacing().item_spacing.x * 2.0)
+                    .max(80.0);
 
                 let can_scroll_left = self.lang_scroll > 0.0;
                 ui.add_enabled_ui(can_scroll_left, |ui| {
                     if ui
-                        .add_sized([arrow_width, 24.0], egui::Button::new("◀"))
+                        .add_sized([arrow_width, 20.0], egui::Button::new("◀"))
                         .clicked()
                     {
                         self.lang_scroll = (self.lang_scroll - 150.0).max(0.0);
@@ -337,7 +361,7 @@ impl eframe::App for SnippetApp {
                 });
 
                 ui.allocate_ui_with_layout(
-                    egui::vec2(left_width, 24.0),
+                    egui::vec2(left_width, 20.0),
                     egui::Layout::left_to_right(egui::Align::Center),
                     |ui| {
                         let output = egui::ScrollArea::horizontal()
@@ -349,9 +373,12 @@ impl eframe::App for SnippetApp {
                             .show(ui, |ui| {
                                 ui.horizontal(|ui| {
                                     ui.add_space(4.0);
+                                    ui.spacing_mut().item_spacing.x = 4.0;
+                                    ui.spacing_mut().button_padding.x = 3.0;
 
+                                    let all_text = egui::RichText::new("Tous").size(12.0);
                                     if ui
-                                        .selectable_label(self.active_language.is_none(), "Tous")
+                                        .selectable_label(self.active_language.is_none(), all_text)
                                         .clicked()
                                     {
                                         self.active_language = None;
@@ -360,7 +387,8 @@ impl eframe::App for SnippetApp {
                                     let mut new_filter: Option<Option<String>> = None;
                                     for lang in &self.languages {
                                         let is_active = self.active_language.as_ref() == Some(lang);
-                                        if ui.selectable_label(is_active, lang).clicked() {
+                                        let label_text = egui::RichText::new(lang).size(12.0);
+                                        if ui.selectable_label(is_active, label_text).clicked() {
                                             new_filter = Some(Some(lang.clone()));
                                         }
                                     }
@@ -380,7 +408,7 @@ impl eframe::App for SnippetApp {
                 let can_scroll_right = self.lang_scroll < self.lang_scroll_max;
                 ui.add_enabled_ui(can_scroll_right, |ui| {
                     if ui
-                        .add_sized([arrow_width, 24.0], egui::Button::new("▶"))
+                        .add_sized([arrow_width, 20.0], egui::Button::new("▶"))
                         .clicked()
                     {
                         self.lang_scroll = (self.lang_scroll + 150.0).min(self.lang_scroll_max);
@@ -392,9 +420,52 @@ impl eframe::App for SnippetApp {
                     if ui.button("⚙").clicked() {
                         self.show_setting_window = true;
                     }
+
+                    let sort_button_text = self.sort_mod.label();
+                    let sort_response =
+                        ui.add_sized([sort_width, 22.0], egui::Button::new(sort_button_text));
+
+                    if sort_response.clicked() {
+                        self.sort_dropdown_open = !self.sort_dropdown_open;
+                    }
+
+                    let sort_anim = ui.ctx().animate_bool_with_time(
+                        egui::Id::new("sort_dropdown_anim"),
+                        self.sort_dropdown_open,
+                        0.12,
+                    );
+
+                    if sort_anim > 0.0 {
+                        let popup_pos = sort_response.rect.left_bottom() + egui::vec2(0.0, 2.0);
+                        let area_response = egui::Area::new(egui::Id::new("sort_dropdown"))
+                            .fixed_pos(popup_pos)
+                            .order(egui::Order::Foreground)
+                            .interactable(self.sort_dropdown_open)
+                            .show(ui.ctx(), |ui| {
+                                egui::Frame::popup(ui.style()).show(ui, |ui| {
+                                    ui.set_opacity(sort_anim);
+                                    ui.set_min_width(140.0);
+                                    for mode in SortMod::all() {
+                                        let selected = self.sort_mod == mode;
+                                        if ui.selectable_label(selected, mode.label()).clicked() {
+                                            self.sort_mod = mode;
+                                            self.sort_dropdown_open = false;
+                                        }
+                                    }
+                                });
+                            });
+                        if self.sort_dropdown_open
+                            && ui.input(|i| i.pointer.any_click())
+                            && !area_response.response.contains_pointer()
+                            && !sort_response.hovered()
+                        {
+                            self.sort_dropdown_open = false;
+                        }
+                    }
+
                     ui.add_space(8.0);
                     ui.add_sized(
-                        [240.0, 22.0],
+                        [search_width, 22.0],
                         egui::TextEdit::singleline(&mut self.search_query)
                             .hint_text("Rechercher..."),
                     );
@@ -445,13 +516,11 @@ impl eframe::App for SnippetApp {
             .show(ui, |ui| {
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     let mut to_select: Option<i64> = None;
-                    for snippet in &self.snippets {
-                        if !snippet_matches(snippet, &self.active_language, &self.search_query) {
-                            continue;
-                        }
-
+                    for &snippet in &visible {
                         let selected = self.selected == Some(snippet.id);
-                        let display_title = truncate(&snippet.title, 28);
+                        let truncated = truncate(&snippet.title, 26);
+                        let star = if snippet.favorite == 1 { "⭐" } else { "  " };
+                        let display_title = format!("{}{}", star, truncated);
                         let label = if selected {
                             format!("▶ {} [{}]", display_title, snippet.language)
                         } else {
@@ -484,6 +553,10 @@ impl eframe::App for SnippetApp {
                                 |ui| {
                                     ui.add_space(8.0);
 
+                                    let star = if snippet.favorite == 1 { "⭐" } else { "☆" };
+                                    if ui.button(star).clicked() {
+                                        to_toggle_favorite = Some(snippet.id);
+                                    }
                                     if ui.button("Supprimer").clicked() {
                                         to_delete_target = Some(snippet.id);
                                     }
@@ -883,6 +956,11 @@ impl eframe::App for SnippetApp {
                 }
                 self.show_delete_confirm = false;
             }
+        }
+
+        if let Some(id) = to_toggle_favorite {
+            toggle_favorite(&self.conn, id).expect("Échec toggle favori");
+            self.snippets = load_all_snippets(&self.conn).expect("Échec reload");
         }
     }
 }
