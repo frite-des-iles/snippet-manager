@@ -42,6 +42,7 @@ struct SnippetApp {
 // ═══════════════════════════════════════════════════════════════════════
 struct Snippet {
     id: i64,
+    signature: String,
     title: String,
     language: String,
     code: String,
@@ -50,7 +51,6 @@ struct Snippet {
     use_count: i64,
     created_at: i64,
     updated_at: i64,
-    signature: String,
 }
 #[derive(Clone, Copy, PartialEq)]
 enum SortMod {
@@ -100,7 +100,7 @@ fn compute_signature(title: &str, language: &str, code: &str, description: &str,
     hasher.update(b"\x1F");
     hasher.update(created_at.to_string().as_bytes());
     let hash = hasher.finalize();
-    hash.iter().map(|b| format!("{:02X}", b)).collect::<String>()
+    hash.iter().map(|b| format!("{:02x}", b)).collect::<String>()
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -109,19 +109,21 @@ fn compute_signature(title: &str, language: &str, code: &str, description: &str,
 
 fn load_all_snippets(conn: &Connection) -> Result<Vec<Snippet>> {
     let mut stmt = conn.prepare(
-        "SELECT id, title, language, code, description, favorite, use_count, created_at, updated_at FROM snippets"
+        "SELECT id, signature, title, language, code, description, favorite, use_count, created_at, updated_at \
+        FROM snippets"
     )?;
     let rows = stmt.query_map([], |row| {
         Ok(Snippet {
             id: row.get(0)?,
-            title: row.get(1)?,
-            language: row.get(2)?,
-            code: row.get(3)?,
-            description: row.get(4)?,
-            favorite: row.get(5)?,
-            use_count: row.get(6)?,
-            created_at: row.get(7)?,
-            updated_at: row.get(8)?,
+            signature: row.get(1)?,
+            title: row.get(2)?,
+            language: row.get(3)?,
+            code: row.get(4)?,
+            description: row.get(5)?,
+            favorite: row.get(6)?,
+            use_count: row.get(7)?,
+            created_at: row.get(8)?,
+            updated_at: row.get(9)?,
         })
     })?;
 
@@ -206,10 +208,9 @@ fn init_db(conn: &Connection) -> Result<()> {
     let mut stmt = conn.prepare(
         "SELECT id, title, language, code, description, created_at
             FROM snippets WHERE signature = ''",
-    );
+    )?;
 
-    let mut binding = stmt?;
-    let rows = binding.query_map([], |row| {
+    let rows = stmt.query_map([], |row| {
         Ok((
             row.get::<_, i64>(0)?,
             row.get::<_, String>(1)?,
@@ -270,10 +271,13 @@ fn insert_snippet(
         .expect("Horloge système invalide")
         .as_secs() as i64;
 
+    let signature = compute_signature(&title, &language, &code, &description, now);
+
     conn.execute(
-        "INSERT INTO snippets (title, language, code, description, favorite, use_count, created_at, updated_at)
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        "INSERT INTO snippets (signature, title, language, code, description, favorite, use_count, created_at, updated_at)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         params![
+            signature,
             title,
             language,
             code,
