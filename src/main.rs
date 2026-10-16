@@ -50,6 +50,7 @@ struct Snippet {
     use_count: i64,
     created_at: i64,
     updated_at: i64,
+    signature: String,
 }
 #[derive(Clone, Copy, PartialEq)]
 enum SortMod {
@@ -85,6 +86,21 @@ fn truncate(s: &str, max_char: usize) -> String {
         let truncated: String = s.chars().take(cutoff).collect();
         format!("{}...", truncated)
     }
+}
+
+fn compute_signature(title: &str, language: &str, code: &str, description: &str, created_at: i64,) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(title.as_bytes());
+    hasher.update(b"\x1F");
+    hasher.update(language.as_bytes());
+    hasher.update(b"\x1F");
+    hasher.update(code.as_bytes());
+    hasher.update(b"\x1F");
+    hasher.update(description.as_bytes());
+    hasher.update(b"\x1F");
+    hasher.update(created_at.to_string().as_bytes());
+    let hash = hasher.finalize();
+    hash.iter().map(|b| format!("{:02X}", b)).collect::<String>()
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -172,6 +188,52 @@ fn init_db(conn: &Connection) -> Result<()> {
         )",
         [],
     )?;
+
+    let has_signature:bool = conn.query_row(
+        "SELECT COUNT(*) FROM pragma_table_info('snippets') WHERE name = 'signature'",
+        [],
+        |r| r.get::<_, i64>(0),
+    ).map(|c| c > 0)?;
+
+
+    if !has_signature {
+        conn.execute(
+            "ALTER TABLE snippets ADD COLUMN signature TEXT NOT NULL DEFAULT ''",
+            [],
+        )?;
+    }
+
+    let mut stmt = conn.prepare(
+        "SELECT id, title, language, code, description, created_at
+            FROM snippets WHERE signature = ''",
+    );
+
+    let mut binding = stmt?;
+    let rows = binding.query_map([], |row| {
+        Ok((
+            row.get::<_, i64>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, String>(3)?,
+            row.get::<_, Option<String>>(4)?,
+            row.get::<_, i64>(5)?,
+        ))
+    })?;
+
+    let mut to_update: Vec<(i64, String)> = Vec::new();
+    for row in rows {
+        let (id, title, language, code, description, created_at) = row?;
+        let desc = description.unwrap_or_default();
+        let sig = compute_signature(&title, &language, &code, &desc, created_at);
+        to_update.push((id, sig));
+    }
+
+    for (id, sig) in to_update {
+        conn.execute(
+            "UPDATE snippets SET signature = ?1 WHERE id = ?2",
+            [sig, id.to_string()],
+        )?;
+    }
 
     conn.execute(
         "CREATE TABLE IF NOT EXISTS languages (
