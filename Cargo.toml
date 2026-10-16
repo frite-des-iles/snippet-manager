@@ -7,3 +7,4 @@ edition = "2024"
 arboard = "3.6.1"
 eframe = "0.36.2"
 rusqlite = { version = "0.40.2", features = ["bundled"] }
+sha2 = "0.11.1"
