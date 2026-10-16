@@ -5,6 +5,7 @@ use arboard;
 use eframe::{Frame, egui};
 use rusqlite::{Connection, Result, params};
 use sha2::{Sha256, Digest};
+use serde::{Serialize, Deserialize};
 
 // ═══════════════════════════════════════════════════════════════════════
 // ÉTAT DE L'APPLICATION
