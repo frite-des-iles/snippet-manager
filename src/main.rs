@@ -4,8 +4,8 @@
 use arboard;
 use eframe::{Frame, egui};
 use rusqlite::{Connection, Result, params};
-use sha2::{Sha256, Digest};
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 // ═══════════════════════════════════════════════════════════════════════
 // ÉTAT DE L'APPLICATION
@@ -36,11 +36,13 @@ struct SnippetApp {
     sort_mod: SortMod,
     sort_dropdown_open: bool,
     always_on_top: bool,
+    import_export_message: Option<String>,
 }
 
 // ═══════════════════════════════════════════════════════════════════════
 // STRUCT MIROIR DE LA TABLE `snippets`
 // ═══════════════════════════════════════════════════════════════════════
+#[derive(Serialize, Deserialize)]
 struct Snippet {
     id: i64,
     signature: String,
@@ -53,6 +55,14 @@ struct Snippet {
     created_at: i64,
     updated_at: i64,
 }
+
+#[derive(Serialize, Deserialize)]
+struct ExportData {
+    version: u32,
+    snippets: Vec<Snippet>,
+    languages: Vec<String>,
+}
+
 #[derive(Clone, Copy, PartialEq)]
 enum SortMod {
     Recent,
@@ -89,7 +99,13 @@ fn truncate(s: &str, max_char: usize) -> String {
     }
 }
 
-fn compute_signature(title: &str, language: &str, code: &str, description: &str, created_at: i64,) -> String {
+fn compute_signature(
+    title: &str,
+    language: &str,
+    code: &str,
+    description: &str,
+    created_at: i64,
+) -> String {
     let mut hasher = Sha256::new();
     hasher.update(title.as_bytes());
     hasher.update(b"\x1F");
@@ -101,7 +117,88 @@ fn compute_signature(title: &str, language: &str, code: &str, description: &str,
     hasher.update(b"\x1F");
     hasher.update(created_at.to_string().as_bytes());
     let hash = hasher.finalize();
-    hash.iter().map(|b| format!("{:02x}", b)).collect::<String>()
+    hash.iter()
+        .map(|b| format!("{:02x}", b))
+        .collect::<String>()
+}
+
+fn export_data(conn: &Connection, path: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let snippets = load_all_snippets(conn)?;
+    let languages = load_languages(conn)?;
+
+    let data = ExportData {
+        version: 1,
+        snippets,
+        languages,
+    };
+
+    let json = serde_json::to_string_pretty(&data)?;
+    std::fs::write(path, json)?;
+
+    Ok(())
+}
+
+fn upsert_snippet_from_import(conn: &Connection, s: &Snippet) -> Result<()> {
+    conn.execute(
+        "INSERT OR REPLACE INTO snippets (id, signature, title, language, code, description, favorite, use_count, created_at, updated_at)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        params![s.id, s.signature, s.title, s.language, s.code, s.description, s.favorite, s.use_count, s.created_at, s.updated_at],
+    )?;
+    Ok(())
+}
+
+fn import_data(conn: &Connection, path: &str) -> Result<(u32, u32), Box<dyn std::error::Error>> {
+    let json = std::fs::read_to_string(path)?;
+    let data: ExportData = serde_json::from_str(&json)?;
+
+    let mut added = 0u32;
+    let mut updated = 0u32;
+
+    let local_languages = load_languages(conn)?;
+    for lang in &data.languages {
+        if !local_languages.contains(lang) {
+            insert_language(conn, lang)?;
+        }
+    }
+
+    let local_snippets = load_all_snippets(conn)?;
+    let local_by_sig: std::collections::HashMap<&str, &Snippet> = local_snippets
+        .iter()
+        .map(|s| (s.signature.as_str(), s))
+        .collect();
+
+    for incoming in &data.snippets {
+        match local_by_sig.get(incoming.signature.as_str()) {
+            None => {
+                conn.execute("INSERT INTO snippets (signature, title, language, code, description, favorite, use_count, created_at, updated_at)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                params![incoming.signature, incoming.title, incoming.language, incoming.code, incoming.description, incoming.favorite, incoming.use_count,incoming.created_at, incoming.updated_at])?;
+                added += 1;
+            }
+            Some(local) => {
+                if incoming.updated_at > local.updated_at {
+                    conn.execute(
+                        "UPDATE snippets
+                         SET title = ?1, language = ?2, code = ?3, description = ?4,
+                             favorite = ?5, use_count = ?6, updated_at = ?7
+                         WHERE id = ?8",
+                        params![
+                            incoming.title,
+                            incoming.language,
+                            incoming.code,
+                            incoming.description,
+                            incoming.favorite,
+                            incoming.use_count,
+                            incoming.updated_at,
+                            local.id,
+                        ],
+                    )?;
+                    updated += 1
+                }
+            }
+        }
+    }
+    Ok((added, updated))
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -110,7 +207,7 @@ fn compute_signature(title: &str, language: &str, code: &str, description: &str,
 
 fn load_all_snippets(conn: &Connection) -> Result<Vec<Snippet>> {
     let mut stmt = conn.prepare(
-        "SELECT id, signature, title, language, code, description, favorite, use_count, created_at, updated_at \
+        "SELECT id, signature, title, language, code, description, favorite, use_count, created_at, updated_at
         FROM snippets"
     )?;
     let rows = stmt.query_map([], |row| {
@@ -192,12 +289,13 @@ fn init_db(conn: &Connection) -> Result<()> {
         [],
     )?;
 
-    let has_signature:bool = conn.query_row(
-        "SELECT COUNT(*) FROM pragma_table_info('snippets') WHERE name = 'signature'",
-        [],
-        |r| r.get::<_, i64>(0),
-    ).map(|c| c > 0)?;
-
+    let has_signature: bool = conn
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('snippets') WHERE name = 'signature'",
+            [],
+            |r| r.get::<_, i64>(0),
+        )
+        .map(|c| c > 0)?;
 
     if !has_signature {
         conn.execute(
@@ -356,7 +454,8 @@ fn toggle_always_on_top(ui: &egui::Ui, state: &mut bool) {
     } else {
         egui::WindowLevel::Normal
     };
-    ui.ctx().send_viewport_cmd(egui::ViewportCommand::WindowLevel(level));
+    ui.ctx()
+        .send_viewport_cmd(egui::ViewportCommand::WindowLevel(level));
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -984,12 +1083,47 @@ impl eframe::App for SnippetApp {
                     ui.add_space(8.0);
 
                     ui.heading("Import / Export");
-                    ui.label("(A venir)");
+                    ui.add_space(6.0);
+
+                    let mut do_export = false;
+                    let mut do_import = false;
+
+                    ui.horizontal(|ui| {
+                        if ui.button("Export").clicked() {
+                            do_export = true;
+                        }
+                        if ui.button("Import").clicked() {
+                            do_import = true;
+                        }
+                    });
+
+                    if do_export {
+                        match export_data(&self.conn, "snippets_export.json") {
+                            Ok(()) => {
+                                self.import_export_message = Some("Export réussi : snippets_export.json".to_string());
+                            }
+                            Err(e) => {
+                                self.import_export_message = Some(format!("Erreur export : {}", e));
+                            }
+                        }
+                    }
+
+                    if do_import {
+                        match import_data(&self.conn, "snippets_export.json") {
+                            Ok((added, updated)) => {
+                                self.import_export_message =
+                                    Some(format!("{} ajoutés, {} mis à jour", added, updated));
+                                self.snippets = load_all_snippets(&self.conn).expect("Échec reload");
+                                self.languages = load_languages(&self.conn).expect("Échec reload");
+                            }
+                            Err(e) => {
+                                self.import_export_message = Some(format!("Erreur import : {}", e));
+                            }
+                        }
+                    }
                 });
 
-            // ⚠️ PATCH : on ne ferme que sur la croix ✕.
-            // Si l'utilisateur n'a rien fait, on ne touche pas à self.*,
-            // sinon la modale se ré-ouvrirait à chaque frame pendant le fade-out.
+
             if !open {
                 self.show_setting_window = false;
             }
@@ -1098,6 +1232,7 @@ fn main() -> eframe::Result {
                 sort_mod: SortMod::Recent,
                 sort_dropdown_open: false,
                 always_on_top: false,
+                import_export_message: None,
             }))
         }),
     )
