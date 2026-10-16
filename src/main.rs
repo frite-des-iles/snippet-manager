@@ -33,6 +33,7 @@ struct SnippetApp {
     editing_id: Option<i64>,
     sort_mod: SortMod,
     sort_dropdown_open: bool,
+    always_on_top: bool,
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -280,6 +281,16 @@ fn snippet_matches(snippet: &Snippet, lang_filter: &Option<String>, query: &str)
             .map_or(false, |d| d.to_lowercase().contains(&q))
 }
 
+fn toggle_always_on_top(ui: &egui::Ui, state: &mut bool) {
+    *state = !*state;
+    let level = if *state {
+        egui::WindowLevel::AlwaysOnTop
+    } else {
+        egui::WindowLevel::Normal
+    };
+    ui.ctx().send_viewport_cmd(egui::ViewportCommand::WindowLevel(level));
+}
+
 // ═══════════════════════════════════════════════════════════════════════
 // INTERFACE
 // ═══════════════════════════════════════════════════════════════════════
@@ -289,6 +300,10 @@ impl eframe::App for SnippetApp {
         let mut to_delete_target: Option<i64> = None;
         let mut to_edit_target: Option<i64> = None;
         let mut to_copy: Option<i64> = None;
+
+        if ui.input(|i| i.modifiers.ctrl && i.key_pressed(egui::Key::T)) {
+            toggle_always_on_top(ui, &mut self.always_on_top);
+        }
 
         let mut visible: Vec<&Snippet> = self
             .snippets
@@ -336,6 +351,8 @@ impl eframe::App for SnippetApp {
 
                 let right_width = gap
                     + magnifier_width
+                    + icon_btn_width
+                    + ui.spacing().item_spacing.x
                     + icon_btn_width
                     + ui.spacing().item_spacing.x
                     + sort_width
@@ -416,6 +433,12 @@ impl eframe::App for SnippetApp {
                 });
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.add_space(8.0);
+                    let pin_icon = if self.always_on_top { "📌" } else { "📍" };
+                    if ui.button(pin_icon).clicked() {
+                        toggle_always_on_top(ui, &mut self.always_on_top);
+                    }
+
                     ui.add_space(8.0);
                     if ui.button("⚙").clicked() {
                         self.show_setting_window = true;
@@ -1006,6 +1029,7 @@ fn main() -> eframe::Result {
                 editing_id: None,
                 sort_mod: SortMod::Recent,
                 sort_dropdown_open: false,
+                always_on_top: false,
             }))
         }),
     )
