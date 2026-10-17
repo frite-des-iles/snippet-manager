@@ -1,7 +1,8 @@
+use std::collections::HashMap;
 // ═══════════════════════════════════════════════════════════════════════
 // IMPORTS
 // ═══════════════════════════════════════════════════════════════════════
-use arboard;
+use arboard::Clipboard;
 use eframe::{Frame, egui};
 use rusqlite::{Connection, Result, params};
 use serde::{Deserialize, Serialize};
@@ -38,6 +39,9 @@ struct SnippetApp {
     sort_dropdown_open: bool,
     always_on_top: bool,
     import_export_message: Option<String>,
+    show_duplicate_window: bool,
+    duplicate_pairs: Vec<(i64, i64)>,
+    merging_with: Option<i64>,
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -163,7 +167,7 @@ fn import_data(conn: &Connection, path: impl AsRef<std::path::Path>,) -> Result<
     }
 
     let local_snippets = load_all_snippets(conn)?;
-    let local_by_sig: std::collections::HashMap<&str, &Snippet> = local_snippets
+    let local_by_sig: HashMap<&str, &Snippet> = local_snippets
         .iter()
         .map(|s| (s.signature.as_str(), s))
         .collect();
@@ -200,6 +204,26 @@ fn import_data(conn: &Connection, path: impl AsRef<std::path::Path>,) -> Result<
         }
     }
     Ok((added, updated))
+}
+
+fn find_duplicates(snippets: &[Snippet]) -> Vec<(i64, i64)> {
+    let mut groups: HashMap<(String, String), Vec<i64>> =  HashMap::new();
+    for s in snippets {
+        let key = (s.language.clone(), s.title.to_lowercase());
+        groups.entry(key).or_default().push(s.id);
+    }
+
+    let mut pairs = Vec::new();
+    for ids in groups.values() {
+        if ids.len() > 1 {
+            let first = ids[0];
+            for &other in &ids[1..] {
+                pairs.push((first, other));
+            }
+        }
+    }
+
+    pairs
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -813,7 +837,7 @@ impl eframe::App for SnippetApp {
 
         if let Some(id) = to_copy {
             if let Some(snippet) = self.snippets.iter().find(|s| s.id == id) {
-                if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                if let Ok(mut clipboard) = Clipboard::new() {
                     let _ = clipboard.set_text(snippet.code.clone());
                 }
             }
@@ -1136,6 +1160,11 @@ impl eframe::App for SnippetApp {
                                     ));
                                     self.snippets = load_all_snippets(&self.conn).expect("Échec reload");
                                     self.languages = load_languages(&self.conn).expect("Échec reload");
+
+                                    self.duplicate_pairs = find_duplicates(&self.snippets);
+                                    if !self.duplicate_pairs.is_empty() {
+                                        self.show_duplicate_window = true;
+                                    }
                                 }
                                 Err(e) => {
                                     self.import_export_message = Some(format!("❌ Erreur import : {}", e));
@@ -1255,6 +1284,9 @@ fn main() -> eframe::Result {
                 sort_dropdown_open: false,
                 always_on_top: false,
                 import_export_message: None,
+                show_duplicate_window: false,
+                duplicate_pairs: Vec::new(),
+                merging_with: None,
             }))
         }),
     )
