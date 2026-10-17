@@ -6,6 +6,7 @@ use eframe::{Frame, egui};
 use rusqlite::{Connection, Result, params};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use rfd::FileDialog;
 
 // ═══════════════════════════════════════════════════════════════════════
 // ÉTAT DE L'APPLICATION
@@ -122,7 +123,7 @@ fn compute_signature(
         .collect::<String>()
 }
 
-fn export_data(conn: &Connection, path: &str) -> Result<(), Box<dyn std::error::Error>> {
+fn export_data(conn: &Connection, path: impl AsRef<std::path::Path>,) -> Result<(), Box<dyn std::error::Error>> {
     let snippets = load_all_snippets(conn)?;
     let languages = load_languages(conn)?;
 
@@ -147,7 +148,7 @@ fn upsert_snippet_from_import(conn: &Connection, s: &Snippet) -> Result<()> {
     Ok(())
 }
 
-fn import_data(conn: &Connection, path: &str) -> Result<(u32, u32), Box<dyn std::error::Error>> {
+fn import_data(conn: &Connection, path: impl AsRef<std::path::Path>,) -> Result<(u32, u32), Box<dyn std::error::Error>> {
     let json = std::fs::read_to_string(path)?;
     let data: ExportData = serde_json::from_str(&json)?;
 
@@ -1089,35 +1090,56 @@ impl eframe::App for SnippetApp {
                     let mut do_import = false;
 
                     ui.horizontal(|ui| {
-                        if ui.button("Export").clicked() {
+                        if ui.button("Export...").clicked() {
                             do_export = true;
                         }
-                        if ui.button("Import").clicked() {
+                        if ui.button("Import...").clicked() {
                             do_import = true;
                         }
                     });
 
+                    if let Some(msg) = &self.import_export_message {
+                        ui.add_space(6.0);
+                        ui.label(msg);
+                    }
+
                     if do_export {
-                        match export_data(&self.conn, "snippets_export.json") {
-                            Ok(()) => {
-                                self.import_export_message = Some("Export réussi : snippets_export.json".to_string());
-                            }
-                            Err(e) => {
-                                self.import_export_message = Some(format!("Erreur export : {}", e));
+                        if let Some(path) = FileDialog::new()
+                            .set_title("Exporter les snippets")
+                            .set_file_name("snippets_export.json")
+                            .add_filter("JSON", &["json"])
+                            .save_file()
+                        {
+                            match export_data(&self.conn, &path) {
+                                Ok(()) => {
+                                    self.import_export_message =
+                                        Some(format!("✅ Export réussi : {}", path.display()));
+                                }
+                                Err(e) => {
+                                    self.import_export_message = Some(format!("❌ Erreur export : {}", e));
+                                }
                             }
                         }
                     }
 
                     if do_import {
-                        match import_data(&self.conn, "snippets_export.json") {
-                            Ok((added, updated)) => {
-                                self.import_export_message =
-                                    Some(format!("{} ajoutés, {} mis à jour", added, updated));
-                                self.snippets = load_all_snippets(&self.conn).expect("Échec reload");
-                                self.languages = load_languages(&self.conn).expect("Échec reload");
-                            }
-                            Err(e) => {
-                                self.import_export_message = Some(format!("Erreur import : {}", e));
+                        if let Some(path) = FileDialog::new()
+                            .set_title("Importer des snippets")
+                            .add_filter("JSON", &["json"])
+                            .pick_file()
+                        {
+                            match import_data(&self.conn, &path) {
+                                Ok((added, updated)) => {
+                                    self.import_export_message = Some(format!(
+                                        "✅ {} ajoutés, {} mis à jour",
+                                        added, updated
+                                    ));
+                                    self.snippets = load_all_snippets(&self.conn).expect("Échec reload");
+                                    self.languages = load_languages(&self.conn).expect("Échec reload");
+                                }
+                                Err(e) => {
+                                    self.import_export_message = Some(format!("❌ Erreur import : {}", e));
+                                }
                             }
                         }
                     }
