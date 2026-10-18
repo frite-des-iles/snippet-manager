@@ -28,8 +28,8 @@ struct SnippetApp {
     language_dropdown_open: bool,
     selected: Option<i64>,
     active_language: Option<String>,
-    lang_scroll: f32,
-    lang_scroll_max: f32,
+    top_lang_dropdown_open: bool,
+    top_lang_filter: String,
     search_query: String,
     show_setting_window: bool,
     new_language_input: String,
@@ -542,160 +542,150 @@ impl eframe::App for SnippetApp {
         egui::Panel::top("top_bar").show(ui, |ui| {
             ui.add_space(6.0);
             ui.horizontal(|ui| {
-                let arrow_width = 22.0;
-                let search_width = 180.0;
-                let sort_width = 140.0;
-                let icon_btn_width = 32.0;
-                let magnifier_width = 20.0;
-                let gap = 8.0;
+                ui.horizontal(|ui| {
+                    let combo_width = 130.0;
+                    let combo_text = self.active_language.as_deref().unwrap_or("Tous");
+                    let combo_response = ui.add_sized([combo_width, 22.0], egui::Button::new(combo_text));
 
-                let right_width = gap
-                    + magnifier_width
-                    + icon_btn_width
-                    + ui.spacing().item_spacing.x
-                    + icon_btn_width
-                    + ui.spacing().item_spacing.x
-                    + sort_width
-                    + ui.spacing().item_spacing.x
-                    + search_width
-                    + ui.spacing().item_spacing.x
-                    + gap;
-
-                let left_width = (ui.available_width()
-                    - right_width
-                    - arrow_width * 2.0
-                    - ui.spacing().item_spacing.x * 2.0)
-                    .max(80.0);
-
-                let can_scroll_left = self.lang_scroll > 0.0;
-                ui.add_enabled_ui(can_scroll_left, |ui| {
-                    if ui
-                        .add_sized([arrow_width, 20.0], egui::Button::new("◀"))
-                        .clicked()
-                    {
-                        self.lang_scroll = (self.lang_scroll - 150.0).max(0.0);
-                    }
-                });
-
-                ui.allocate_ui_with_layout(
-                    egui::vec2(left_width, 20.0),
-                    egui::Layout::left_to_right(egui::Align::Center),
-                    |ui| {
-                        let output = egui::ScrollArea::horizontal()
-                            .id_salt("lang_tabs_scroll")
-                            .scroll_bar_visibility(
-                                egui::scroll_area::ScrollBarVisibility::AlwaysHidden,
-                            )
-                            .horizontal_scroll_offset(self.lang_scroll)
-                            .show(ui, |ui| {
-                                ui.horizontal(|ui| {
-                                    ui.add_space(4.0);
-                                    ui.spacing_mut().item_spacing.x = 4.0;
-                                    ui.spacing_mut().button_padding.x = 3.0;
-
-                                    let all_text = egui::RichText::new("Tous").size(12.0);
-                                    if ui
-                                        .selectable_label(self.active_language.is_none(), all_text)
-                                        .clicked()
-                                    {
-                                        self.active_language = None;
-                                    }
-
-                                    let mut new_filter: Option<Option<String>> = None;
-                                    for lang in &self.languages {
-                                        let is_active = self.active_language.as_ref() == Some(lang);
-                                        let label_text = egui::RichText::new(lang).size(12.0);
-                                        if ui.selectable_label(is_active, label_text).clicked() {
-                                            new_filter = Some(Some(lang.clone()));
-                                        }
-                                    }
-                                    if let Some(f) = new_filter {
-                                        self.active_language = f;
-                                    }
-
-                                    ui.add_space(4.0);
-                                });
-                            });
-
-                        self.lang_scroll_max =
-                            (output.content_size.x - output.inner_rect.width()).max(0.0);
-                    },
-                );
-
-                let can_scroll_right = self.lang_scroll < self.lang_scroll_max;
-                ui.add_enabled_ui(can_scroll_right, |ui| {
-                    if ui
-                        .add_sized([arrow_width, 20.0], egui::Button::new("▶"))
-                        .clicked()
-                    {
-                        self.lang_scroll = (self.lang_scroll + 150.0).min(self.lang_scroll_max);
-                    }
-                });
-
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.add_space(8.0);
-                    let pin_icon = if self.always_on_top { "📌" } else { "📍" };
-                    if ui.button(pin_icon).clicked() {
-                        toggle_always_on_top(ui, &mut self.always_on_top);
+                    if combo_response.clicked() {
+                        self.top_lang_dropdown_open = !self.top_lang_dropdown_open;
+                        self.top_lang_filter.clear();
                     }
 
-                    ui.add_space(8.0);
-                    if ui.button("⚙").clicked() {
-                        self.show_setting_window = true;
-                    }
-
-                    let sort_button_text = self.sort_mod.label();
-                    let sort_response =
-                        ui.add_sized([sort_width, 22.0], egui::Button::new(sort_button_text));
-
-                    if sort_response.clicked() {
-                        self.sort_dropdown_open = !self.sort_dropdown_open;
-                    }
-
-                    let sort_anim = ui.ctx().animate_bool_with_time(
-                        egui::Id::new("sort_dropdown_anim"),
-                        self.sort_dropdown_open,
+                    let lang_anim = ui.ctx().animate_bool_with_time(
+                        egui::Id::new("top_lang_dropdown_anim"),
+                        self.top_lang_dropdown_open,
                         0.12,
                     );
 
-                    if sort_anim > 0.0 {
-                        let popup_pos = sort_response.rect.left_bottom() + egui::vec2(0.0, 2.0);
-                        let area_response = egui::Area::new(egui::Id::new("sort_dropdown"))
+                    if lang_anim > 0.0 {
+                        let popup_pos = combo_response.rect.left_bottom() + egui::vec2(0.0, 2.0);
+                        let area_response = egui::Area::new(egui::Id::new("top_lang_dropdown"))
                             .fixed_pos(popup_pos)
                             .order(egui::Order::Foreground)
-                            .interactable(self.sort_dropdown_open)
+                            .interactable(self.top_lang_dropdown_open)
                             .show(ui.ctx(), |ui| {
                                 egui::Frame::popup(ui.style()).show(ui, |ui| {
-                                    ui.set_opacity(sort_anim);
-                                    ui.set_min_width(140.0);
-                                    for mode in SortMod::all() {
-                                        let selected = self.sort_mod == mode;
-                                        if ui.selectable_label(selected, mode.label()).clicked() {
-                                            self.sort_mod = mode;
-                                            self.sort_dropdown_open = false;
-                                        }
+                                    ui.set_opacity(lang_anim);
+                                    ui.set_min_width(combo_width);
+
+                                    ui.add(
+                                        egui::TextEdit::singleline(&mut self.top_lang_filter)
+                                            .hint_text("Rechercher...")
+                                            .desired_width(combo_width),
+                                    );
+                                    ui.add_space(4.0);
+                                    ui.separator();
+                                    ui.add_space(4.0);
+
+                                    let filter = self.top_lang_filter.to_lowercase();
+                                    let mut picked: Option<Option<String>> = None;
+
+                                    egui::ScrollArea::vertical()
+                                        .max_height(200.0)
+                                        .show(ui, |ui| {
+                                            if filter.is_empty() || "tous".contains(&filter) {
+                                                if ui.selectable_label(self.active_language.is_none(), "Tous").clicked() {
+                                                    picked = Some(None);
+                                                }
+                                            }
+
+                                            let mut found = false;
+                                            for lang in &self.languages {
+                                                if filter.is_empty() || lang.to_lowercase().contains(&filter) {
+                                                    found = true;
+                                                    let is_active = self.active_language.as_ref() == Some(lang);
+                                                    if ui.selectable_label(is_active, lang).clicked() {
+                                                        picked = Some(Some(lang.clone()));
+                                                    }
+                                                }
+                                            }
+
+                                            if !found && !filter.is_empty() {
+                                                ui.weak("Aucun résultat");
+                                            }
+                                        });
+
+                                    if let Some(p) = picked {
+                                        self.active_language = p;
+                                        self.top_lang_dropdown_open = false;
                                     }
                                 });
                             });
-                        if self.sort_dropdown_open
+
+                        if self.top_lang_dropdown_open
                             && ui.input(|i| i.pointer.any_click())
                             && !area_response.response.contains_pointer()
-                            && !sort_response.hovered()
+                            && !combo_response.hovered()
                         {
-                            self.sort_dropdown_open = false;
+                            self.top_lang_dropdown_open = false;
                         }
                     }
 
-                    ui.add_space(8.0);
-                    ui.add_sized(
-                        [search_width, 22.0],
-                        egui::TextEdit::singleline(&mut self.search_query)
-                            .hint_text("Rechercher..."),
-                    );
-                    ui.label("🔍");
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.add_space(8.0);
+                        let pin_icon = if self.always_on_top { "📌" } else { "📍" };
+                        if ui.button(pin_icon).clicked() {
+                            toggle_always_on_top(ui, &mut self.always_on_top);
+                        }
+
+                        ui.add_space(8.0);
+                        if ui.button("⚙").clicked() {
+                            self.show_setting_window = true;
+                        }
+
+                        let sort_button_text = self.sort_mod.label();
+                        let sort_response =
+                            ui.add_sized([140.0, 22.0], egui::Button::new(sort_button_text));
+
+                        if sort_response.clicked() {
+                            self.sort_dropdown_open = !self.sort_dropdown_open;
+                        }
+
+                        let sort_anim = ui.ctx().animate_bool_with_time(
+                            egui::Id::new("sort_dropdown_anim"),
+                            self.sort_dropdown_open,
+                            0.12,
+                        );
+
+                        if sort_anim > 0.0 {
+                            let popup_pos = sort_response.rect.left_bottom() + egui::vec2(0.0, 2.0);
+                            let area_response = egui::Area::new(egui::Id::new("sort_dropdown"))
+                                .fixed_pos(popup_pos)
+                                .order(egui::Order::Foreground)
+                                .interactable(self.sort_dropdown_open)
+                                .show(ui.ctx(), |ui| {
+                                    egui::Frame::popup(ui.style()).show(ui, |ui| {
+                                        ui.set_opacity(sort_anim);
+                                        ui.set_min_width(140.0);
+                                        for mode in SortMod::all() {
+                                            let selected = self.sort_mod == mode;
+                                            if ui.selectable_label(selected, mode.label()).clicked() {
+                                                self.sort_mod = mode;
+                                                self.sort_dropdown_open = false;
+                                            }
+                                        }
+                                    });
+                                });
+                            if self.sort_dropdown_open
+                                && ui.input(|i| i.pointer.any_click())
+                                && !area_response.response.contains_pointer()
+                                && !sort_response.hovered()
+                            {
+                                self.sort_dropdown_open = false;
+                            }
+                        }
+
+                        ui.add_space(8.0);
+                        ui.add_sized(
+                            [180.0, 22.0],
+                            egui::TextEdit::singleline(&mut self.search_query)
+                                .hint_text("Rechercher..."),
+                        );
+                        ui.label("🔍");
+                    });
                 });
             });
-            ui.add_space(6.0);
         });
 
         // ═══════════════════════════════════════════════════════════════
@@ -1439,8 +1429,8 @@ fn main() -> eframe::Result {
                 language_dropdown_open: false,
                 selected: None,
                 active_language: None,
-                lang_scroll: 0.0,
-                lang_scroll_max: 0.0,
+                top_lang_dropdown_open: false,
+                top_lang_filter: String::new(),
                 search_query: String::new(),
                 show_setting_window: false,
                 new_language_input: String::new(),
