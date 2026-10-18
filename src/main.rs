@@ -154,14 +154,6 @@ fn export_data(conn: &Connection, path: impl AsRef<std::path::Path>,) -> Result<
     Ok(())
 }
 
-fn upsert_snippet_from_import(conn: &Connection, s: &Snippet) -> Result<()> {
-    conn.execute(
-        "INSERT OR REPLACE INTO snippets (id, signature, title, language, code, description, favorite, use_count, created_at, updated_at)
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-        params![s.id, s.signature, s.title, s.language, s.code, s.description, s.favorite, s.use_count, s.created_at, s.updated_at],
-    )?;
-    Ok(())
-}
 
 fn import_data(conn: &Connection, path: impl AsRef<std::path::Path>,) -> Result<(u32, u32), Box<dyn std::error::Error>> {
     let json = std::fs::read_to_string(path)?;
