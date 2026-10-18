@@ -42,7 +42,7 @@ struct SnippetApp {
     sort_dropdown_open: bool,
     always_on_top: bool,
     import_export_message: Option<String>,
-    show_duplicate_window: bool,
+    show_duplicates_window: bool,
     duplicate_pairs: Vec<(i64, i64)>,
     merging_with: Option<i64>,
 }
@@ -138,7 +138,10 @@ fn compute_signature(
         .collect::<String>()
 }
 
-fn export_data(conn: &Connection, path: impl AsRef<std::path::Path>,) -> Result<(), Box<dyn std::error::Error>> {
+fn export_data(
+    conn: &Connection,
+    path: impl AsRef<std::path::Path>,
+) -> Result<(), Box<dyn std::error::Error>> {
     let snippets = load_all_snippets(conn)?;
     let languages = load_languages(conn)?;
 
@@ -155,7 +158,10 @@ fn export_data(conn: &Connection, path: impl AsRef<std::path::Path>,) -> Result<
 }
 
 
-fn import_data(conn: &Connection, path: impl AsRef<std::path::Path>,) -> Result<(u32, u32), Box<dyn std::error::Error>> {
+fn import_data(
+    conn: &Connection,
+    path: impl AsRef<std::path::Path>,
+) -> Result<(u32, u32), Box<dyn std::error::Error>> {
     let json = std::fs::read_to_string(path)?;
     let data: ExportData = serde_json::from_str(&json)?;
 
@@ -180,7 +186,7 @@ fn import_data(conn: &Connection, path: impl AsRef<std::path::Path>,) -> Result<
             None => {
                 conn.execute("INSERT INTO snippets (signature, title, language, code, description, favorite, use_count, created_at, updated_at)
                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-                params![incoming.signature, incoming.title, incoming.language, incoming.code, incoming.description, incoming.favorite, incoming.use_count,incoming.created_at, incoming.updated_at])?;
+                             params![incoming.signature, incoming.title, incoming.language, incoming.code, incoming.description, incoming.favorite, incoming.use_count,incoming.created_at, incoming.updated_at])?;
                 added += 1;
             }
             Some(local) => {
@@ -210,7 +216,7 @@ fn import_data(conn: &Connection, path: impl AsRef<std::path::Path>,) -> Result<
 }
 
 fn find_duplicates(snippets: &[Snippet]) -> Vec<(i64, i64)> {
-    let mut groups: HashMap<(String, String), Vec<i64>> =  HashMap::new();
+    let mut groups: HashMap<(String, String), Vec<i64>> = HashMap::new();
     for s in snippets {
         let key = (s.language.clone(), s.title.to_lowercase());
         groups.entry(key).or_default().push(s.id);
@@ -1148,7 +1154,8 @@ impl eframe::App for SnippetApp {
                                         Some(format!("✅ Export réussi : {}", path.display()));
                                 }
                                 Err(e) => {
-                                    self.import_export_message = Some(format!("❌ Erreur export : {}", e));
+                                    self.import_export_message =
+                                        Some(format!("❌ Erreur export : {}", e));
                                 }
                             }
                         }
@@ -1166,22 +1173,24 @@ impl eframe::App for SnippetApp {
                                         "✅ {} ajoutés, {} mis à jour",
                                         added, updated
                                     ));
-                                    self.snippets = load_all_snippets(&self.conn).expect("Échec reload");
-                                    self.languages = load_languages(&self.conn).expect("Échec reload");
+                                    self.snippets =
+                                        load_all_snippets(&self.conn).expect("Échec reload");
+                                    self.languages =
+                                        load_languages(&self.conn).expect("Échec reload");
 
                                     self.duplicate_pairs = find_duplicates(&self.snippets);
                                     if !self.duplicate_pairs.is_empty() {
-                                        self.show_duplicate_window = true;
+                                        self.show_duplicates_window = true;
                                     }
                                 }
                                 Err(e) => {
-                                    self.import_export_message = Some(format!("❌ Erreur import : {}", e));
+                                    self.import_export_message =
+                                        Some(format!("❌ Erreur import : {}", e));
                                 }
                             }
                         }
                     }
                 });
-
 
             if !open {
                 self.show_setting_window = false;
@@ -1292,7 +1301,7 @@ fn main() -> eframe::Result {
                 sort_dropdown_open: false,
                 always_on_top: false,
                 import_export_message: None,
-                show_duplicate_window: false,
+                show_duplicates_window: false,
                 duplicate_pairs: Vec::new(),
                 merging_with: None,
             }))
