@@ -44,6 +44,7 @@ struct SnippetApp {
     show_duplicates_window: bool,
     duplicate_pairs: Vec<(i64, i64)>,
     merging_with: Option<i64>,
+    last_window_size: egui::Vec2,
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -383,6 +384,14 @@ fn init_db(conn: &Connection) -> Result<()> {
         }
     }
 
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS settings (
+            key   TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        )",
+        [],
+    )?;
+
     Ok(())
 }
 
@@ -491,6 +500,23 @@ fn toggle_always_on_top(ui: &egui::Ui, state: &mut bool) {
         .send_viewport_cmd(egui::ViewportCommand::WindowLevel(level));
 }
 
+fn get_setting(conn: &Connection, key: &str) -> Option<String> {
+    conn.query_row(
+        "SELECT value FROM settings WHERE key = ?1",
+        [key],
+        |row| row.get(0),
+    )
+        .ok()
+}
+
+fn set_setting(conn: &Connection, key: &str, value: &str) -> Result<()> {
+    conn.execute(
+        "INSERT OR REPLACE INTO settings (key, value) VALUES (?1, ?2)",
+        params![key, value],
+    )?;
+    Ok(())
+}
+
 // ═══════════════════════════════════════════════════════════════════════
 // INTERFACE
 // ═══════════════════════════════════════════════════════════════════════
@@ -500,6 +526,13 @@ impl eframe::App for SnippetApp {
         let mut to_delete_target: Option<i64> = None;
         let mut to_edit_target: Option<i64> = None;
         let mut to_copy: Option<i64> = None;
+
+        let current_size = ui.viewport_rect().size();
+        if current_size != self.last_window_size && current_size.x > 0.0 && current_size.y > 0.0 {
+            self.last_window_size = current_size;
+            let size_str = format!("{}x{}", current_size.x, current_size.y);
+            let _ = set_setting(&self.conn, "window_size", &size_str);
+        }
 
         if ui.input(|i| i.modifiers.ctrl && i.key_pressed(egui::Key::T)) {
             toggle_always_on_top(ui, &mut self.always_on_top);
@@ -1410,9 +1443,19 @@ fn main() -> eframe::Result {
     let snippets = load_all_snippets(&conn).expect("Impossible de charger les snippets");
     let languages = load_languages(&conn).expect("Échec chargement langages");
 
+    let mut window_size = [750.0, 500.0];
+    if let Some(size_str) = get_setting(&conn, "window_size") {
+        let parts: Vec<&str> = size_str.split('x').collect();
+        if parts.len() == 2 {
+            if let (Ok(w), Ok(h)) = (parts[0].parse::<f32>(), parts[1].parse::<f32>()) {
+                window_size = [w, h];
+            }
+        }
+    }
+
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([750.0, 500.0])
+            .with_inner_size(window_size)
             .with_min_inner_size([600.0, 400.0]),
         ..Default::default()
     };
@@ -1452,6 +1495,7 @@ fn main() -> eframe::Result {
                 show_duplicates_window: false,
                 duplicate_pairs: Vec::new(),
                 merging_with: None,
+                last_window_size: egui::Vec2::ZERO,
             }))
         }),
     )
