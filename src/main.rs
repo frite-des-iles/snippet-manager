@@ -107,6 +107,14 @@ fn truncate(s: &str, max_char: usize) -> String {
     }
 }
 
+fn format_timestamp(ts: i64) -> String {
+    Local
+        .timestamp_opt(ts, 0)
+        .single()
+        .map(|dt| dt.format("%d-%m-%Y %H:%M").to_string())
+        .unwrap_or_else(|| "?".to_string())
+}
+
 fn compute_signature(
     title: &str,
     language: &str,
