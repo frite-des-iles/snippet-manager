@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 // ═══════════════════════════════════════════════════════════════════════
 // IMPORTS
 // ═══════════════════════════════════════════════════════════════════════
@@ -1016,6 +1015,12 @@ impl eframe::App for SnippetApp {
                                         description,
                                     )
                                     .expect("Échec de l'édition");
+
+                                    if let Some(other_id) = self.merging_with {
+                                        delete_snippet(&self.conn, other_id)
+                                            .expect("Échec suppression doublon");
+                                        self.merging_with = None;
+                                    }
                                 } else {
                                     insert_snippet(&self.conn, title, language, code, description)
                                         .expect("Échec de l'insertion");
@@ -1036,6 +1041,7 @@ impl eframe::App for SnippetApp {
                         if ui.button("Annuler").clicked() {
                             self.add_error = None;
                             self.editing_id = None;
+                            self.merging_with = None;
                             self.new_title.clear();
                             self.new_language.clear();
                             self.new_code.clear();
@@ -1133,6 +1139,16 @@ impl eframe::App for SnippetApp {
                         }
                         if ui.button("Import...").clicked() {
                             do_import = true;
+                        }
+                        ui.add_space(8.0);
+                        if ui.button("Chercher les doublons").clicked() {
+                            self.duplicate_pairs = find_duplicates(&self.snippets);
+                            if !self.duplicate_pairs.is_empty() {
+                                self.show_duplicates_window = true;
+                            } else {
+                                self.import_export_message =
+                                    Some("✅ Aucun doublon détecté.".to_string());
+                            }
                         }
                     });
 
@@ -1251,9 +1267,144 @@ impl eframe::App for SnippetApp {
             }
         }
 
-        if let Some(id) = to_toggle_favorite {
-            toggle_favorite(&self.conn, id).expect("Échec toggle favori");
-            self.snippets = load_all_snippets(&self.conn).expect("Échec reload");
+        let dup_anim = ui.ctx().animate_bool_with_time(
+            egui::Id::new("duplicates_window_anim"),
+            self.show_duplicates_window,
+            0.12,
+        );
+
+        if dup_anim > 0.0 {
+            let mut open = true;
+
+            let mut delete_a: Option<i64> = None;
+            let mut delete_b: Option<i64> = None;
+            let mut merge_ab: Option<(i64, i64)> = None;
+            let mut remove_pair: Option<usize> = None;
+
+            egui::Window::new("Doublons détectés")
+                .open(&mut open)
+                .collapsible(false)
+                .resizable(true)
+                .default_size([700.0, 500.0])
+                .interactable(self.show_duplicates_window)
+                .show(ui.ctx(), |ui| {
+                    ui.set_opacity(dup_anim);
+                    ui.label("Ces snippets ont le même langage et le même titre, mais ne sont pas les mêmes.");
+                    ui.add_space(8.0);
+
+                    egui::ScrollArea::vertical().show(ui, |ui| {
+                        for (i, &(id_a, id_b)) in self.duplicate_pairs.iter().enumerate() {
+                            let s_a = self.snippets.iter().find(|s| s.id == id_a);
+                            let s_b = self.snippets.iter().find(|s| s.id == id_b);
+
+                            if let (Some(sa), Some(sb)) = (s_a, s_b) {
+                                ui.group(|ui| {
+                                    ui.horizontal(|ui| {
+                                        ui.vertical(|ui| {
+                                            ui.heading(&sa.title);
+                                            ui.label(format!("Langage : {}", sa.language));
+                                            ui.label(format!("Date : {}", format_timestamp(sa.created_at)));
+                                            ui.add_space(4.0);
+                                            egui::ScrollArea::vertical()
+                                                .max_height(150.0)
+                                                .id_salt(format!("code_a_{}", i))
+                                                .show(ui, |ui| {
+                                                    ui.monospace(&sa.code);
+                                                });
+
+                                            ui.add_space(4.0);
+                                            if ui.button("Garder").clicked() {
+                                                delete_b = Some(sb.id);
+                                                remove_pair = Some(i);
+                                            }
+                                        });
+                                        ui.separator();
+
+                                        ui.vertical(|ui| {
+                                            ui.heading(&sb.title);
+                                            ui.label(format!("Langage : {}", sb.language));
+                                            ui.label(format!("Date : {}", format_timestamp(sb.created_at)));
+                                            ui.add_space(4.0);
+                                            egui::ScrollArea::vertical().max_height(150.0).id_salt(format!("code_b_{}", i)).show(ui, |ui| {
+                                                ui.monospace(&sb.code);
+                                            });
+                                            ui.add_space(4.0);
+                                            if ui.button("Garder").clicked() {
+                                                delete_a = Some(sa.id);
+                                                remove_pair = Some(i);
+                                            }
+                                        });
+
+                                        ui.separator();
+                                        ui.vertical(|ui| {
+                                            ui.label("Actions :");
+                                            if ui.button("Garder les 2").clicked() {
+                                                remove_pair = Some(i);
+                                            }
+                                            if ui.button("Fusionner").clicked() {
+                                                merge_ab = Some((sa.id, sb.id));
+                                                remove_pair = Some(i);
+                                            }
+                                        });
+                                    });
+                                });
+                                ui.add_space(8.0);
+                            } else {
+                                remove_pair = Some(i)
+                            }
+                        }
+                    });
+                });
+
+            if let Some(i) = remove_pair {
+                self.duplicate_pairs.remove(i);
+            }
+            let deleted_something = delete_a.is_some() || delete_b.is_some();
+
+            if let Some(id) = delete_a {
+                delete_snippet(&self.conn, id).expect("Échec suppression A");
+                self.snippets = load_all_snippets(&self.conn).expect("Échec reload");
+            }
+            if let Some(id) = delete_b {
+                delete_snippet(&self.conn, id).expect("Échec suppression B");
+                self.snippets = load_all_snippets(&self.conn).expect("Échec reload");
+            }
+
+            if let Some((id_a, id_b)) = merge_ab {
+                if let Some(sa) = self.snippets.iter().find(|s| s.id == id_a) {
+                    if let Some(sb) = self.snippets.iter().find(|s| s.id == id_b) {
+                        self.new_title = sa.title.clone();
+                        self.new_language = sa.language.clone();
+                        self.new_code = format!(
+                            "{}\n\n// --- Fusionné depuis un doublon ---\n\n{}",
+                            sa.code, sb.code
+                        );
+                        self.new_description = format!(
+                            "{} / {}",
+                            sa.description.clone().unwrap_or_default(),
+                            sb.description.clone().unwrap_or_default()
+                        );
+                        self.editing_id = Some(id_a);
+                        self.merging_with = Some(id_b);
+                        self.show_add_window = true;
+                    }
+                }
+            }
+
+            if deleted_something {
+                self.duplicate_pairs = find_duplicates(&self.snippets);
+            } else if let Some(i) = remove_pair {
+                if i < self.duplicate_pairs.len() {
+                    self.duplicate_pairs.remove(i);
+                }
+            }
+
+            if self.duplicate_pairs.is_empty() {
+                self.show_duplicates_window = false;
+            }
+            if !open {
+                self.show_duplicates_window = false;
+            }
         }
     }
 }
