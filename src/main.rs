@@ -1051,9 +1051,7 @@ impl eframe::App for SnippetApp {
                     });
                 });
 
-            // ⚠️ PATCH : on ne ferme QUE si l'utilisateur l'a demandé
-            // (bouton Ajouter/Annuler, ou croix ✕ de la fenêtre).
-            // Sinon, on ne touche à rien → l'animation peut descendre.
+
             if close_requested || !open {
                 self.show_add_window = false;
             }
@@ -1303,7 +1301,8 @@ impl eframe::App for SnippetApp {
                                         ui.vertical(|ui| {
                                             ui.heading(&sa.title);
                                             ui.label(format!("Langage : {}", sa.language));
-                                            ui.label(format!("Date : {}", format_timestamp(sa.created_at)));
+                                            ui.label(format!("Créé : {}", format_timestamp(sa.created_at)));
+                                            ui.label(format!("Modifié : {}", format_timestamp(sa.updated_at)));
                                             ui.add_space(4.0);
                                             egui::ScrollArea::vertical()
                                                 .max_height(150.0)
@@ -1323,7 +1322,8 @@ impl eframe::App for SnippetApp {
                                         ui.vertical(|ui| {
                                             ui.heading(&sb.title);
                                             ui.label(format!("Langage : {}", sb.language));
-                                            ui.label(format!("Date : {}", format_timestamp(sb.created_at)));
+                                            ui.label(format!("Créé : {}", format_timestamp(sb.created_at)));
+                                            ui.label(format!("Modifié : {}", format_timestamp(sb.updated_at)));
                                             ui.add_space(4.0);
                                             egui::ScrollArea::vertical().max_height(150.0).id_salt(format!("code_b_{}", i)).show(ui, |ui| {
                                                 ui.monospace(&sb.code);
