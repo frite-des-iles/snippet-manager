@@ -848,6 +848,11 @@ impl eframe::App for SnippetApp {
             self.snippets = load_all_snippets(&self.conn).expect("Échec reload");
         }
 
+        if let Some(id) = to_toggle_favorite {
+            toggle_favorite(&self.conn, id).expect("Échec toggle favori");
+            self.snippets = load_all_snippets(&self.conn).expect("Échec reload");
+        }
+
         // ═══════════════════════════════════════════════════════════════
         // MODALE : AJOUT DE SNIPPET
         // ═══════════════════════════════════════════════════════════════
