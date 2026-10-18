@@ -4,10 +4,13 @@ use std::collections::HashMap;
 // ═══════════════════════════════════════════════════════════════════════
 use arboard::Clipboard;
 use eframe::{Frame, egui};
+use rfd::FileDialog;
 use rusqlite::{Connection, Result, params};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use rfd::FileDialog;
+use std::collections::HashMap;
+use chrono::prelude::Local;
+use chrono::TimeZone;
 
 // ═══════════════════════════════════════════════════════════════════════
 // ÉTAT DE L'APPLICATION
