@@ -543,7 +543,7 @@ impl eframe::App for SnippetApp {
             ui.add_space(6.0);
             ui.horizontal(|ui| {
                 ui.horizontal(|ui| {
-                    let combo_width = 130.0;
+                    let combo_width = 110.0;
                     let combo_text = self.active_language.as_deref().unwrap_or("Tous");
                     let combo_response = ui.add_sized([combo_width, 22.0], egui::Button::new(combo_text));
 
@@ -636,7 +636,7 @@ impl eframe::App for SnippetApp {
 
                         let sort_button_text = self.sort_mod.label();
                         let sort_response =
-                            ui.add_sized([140.0, 22.0], egui::Button::new(sort_button_text));
+                            ui.add_sized([120.0, 22.0], egui::Button::new(sort_button_text));
 
                         if sort_response.clicked() {
                             self.sort_dropdown_open = !self.sort_dropdown_open;
@@ -678,7 +678,7 @@ impl eframe::App for SnippetApp {
 
                         ui.add_space(8.0);
                         ui.add_sized(
-                            [180.0, 22.0],
+                            [150.0, 22.0],
                             egui::TextEdit::singleline(&mut self.search_query)
                                 .hint_text("Rechercher..."),
                         );
@@ -723,9 +723,9 @@ impl eframe::App for SnippetApp {
         // ═══════════════════════════════════════════════════════════════
         egui::Panel::left("snippet_list")
             .resizable(true)
-            .default_size(320.0)
-            .min_size(220.0)
-            .max_size(420.0)
+            .default_size(260.0)
+            .min_size(180.0)
+            .max_size(400.0)
             .show(ui, |ui| {
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     let mut to_select: Option<i64> = None;
@@ -1410,7 +1410,14 @@ fn main() -> eframe::Result {
     let snippets = load_all_snippets(&conn).expect("Impossible de charger les snippets");
     let languages = load_languages(&conn).expect("Échec chargement langages");
 
-    let options = eframe::NativeOptions::default();
+    let options = eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default()
+            .with_inner_size([750.0, 500.0])
+            .with_min_inner_size([600.0, 400.0]),
+        ..Default::default()
+    };
+
+
     eframe::run_native(
         "Snippet Manager",
         options,
