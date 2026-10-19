@@ -234,11 +234,7 @@ fn find_duplicates(snippets: &[Snippet]) -> Vec<(i64, i64)> {
     pairs
 }
 
-fn handle_auto_close(
-    ui: &mut egui::Ui,
-    text_edit_id: egui::Id,
-    text: &mut String,
-) {
+fn handle_auto_close(ui: &mut egui::Ui, text_edit_id: egui::Id, text: &mut String) {
     let mut typed_char = None;
     ui.input_mut(|i| {
         for idx in (0..i.events.len()).rev() {
@@ -275,28 +271,34 @@ fn handle_auto_close(
             let chars: Vec<char> = text.chars().collect();
 
             if let Some(open_char) = open {
-                // CAS A : Ouverture. On insère la paire complète.
                 let byte_idx: usize = text.chars().take(idx_usize).map(|ch| ch.len_utf8()).sum();
                 text.insert(byte_idx, open_char);
                 text.insert(byte_idx + open_char.len_utf8(), close.unwrap());
 
-                state.cursor.set_char_range(Some(egui::text::CCursorRange::one(
-                    egui::text::CCursor::new(CharIndex::from(idx_usize + 1)),
-                )));
+                state
+                    .cursor
+                    .set_char_range(Some(egui::text::CCursorRange::one(
+                        egui::text::CCursor::new(CharIndex::from(idx_usize + 1)),
+                    )));
                 state.store(ui.ctx(), text_edit_id);
             } else if let Some(close_char) = close {
                 if idx_usize < chars.len() && chars[idx_usize] == close_char {
-                    state.cursor.set_char_range(Some(egui::text::CCursorRange::one(
-                        egui::text::CCursor::new(CharIndex::from(idx_usize + 1)),
-                    )));
+                    state
+                        .cursor
+                        .set_char_range(Some(egui::text::CCursorRange::one(
+                            egui::text::CCursor::new(CharIndex::from(idx_usize + 1)),
+                        )));
                     state.store(ui.ctx(), text_edit_id);
                 } else {
-                    let byte_idx: usize = text.chars().take(idx_usize).map(|ch| ch.len_utf8()).sum();
+                    let byte_idx: usize =
+                        text.chars().take(idx_usize).map(|ch| ch.len_utf8()).sum();
                     text.insert(byte_idx, close_char);
 
-                    state.cursor.set_char_range(Some(egui::text::CCursorRange::one(
-                        egui::text::CCursor::new(CharIndex::from(idx_usize + 1)),
-                    )));
+                    state
+                        .cursor
+                        .set_char_range(Some(egui::text::CCursorRange::one(
+                            egui::text::CCursor::new(CharIndex::from(idx_usize + 1)),
+                        )));
                     state.store(ui.ctx(), text_edit_id);
                 }
             }
@@ -1087,7 +1089,7 @@ impl eframe::App for SnippetApp {
                         egui::TextEdit::multiline(&mut self.new_code)
                             .id(code_edit_id)
                             .desired_rows(10)
-                            .desired_width(ui.available_width())
+                            .desired_width(ui.available_width()),
                     );
                     ui.add_space(6.0);
 
