@@ -991,185 +991,202 @@ impl eframe::App for SnippetApp {
                 .show(ui.ctx(), |ui| {
                     ui.set_opacity(add_anim);
 
-                    ui.label("Titre");
-                    ui.add_sized(
-                        [ui.available_width(), 22.0],
-                        egui::TextEdit::singleline(&mut self.new_title),
-                    );
+                    egui::ScrollArea::vertical()
+                        .max_height(ui.available_height() - 10.0)
+                        .show(ui, |ui| {
+                            ui.label("Titre");
+                            ui.add_sized(
+                                [ui.available_width(), 22.0],
+                                egui::TextEdit::singleline(&mut self.new_title),
+                            );
 
-                    ui.label("Langage");
+                            ui.label("Langage");
 
-                    let button_text = if self.new_language.is_empty() {
-                        "Choisir un langage...".to_string()
-                    } else {
-                        self.new_language.clone()
-                    };
-                    let button_response =
-                        ui.add_sized([220.0, 24.0], egui::Button::new(button_text));
+                            let button_text = if self.new_language.is_empty() {
+                                "Choisir un langage...".to_string()
+                            } else {
+                                self.new_language.clone()
+                            };
+                            let button_response =
+                                ui.add_sized([220.0, 24.0], egui::Button::new(button_text));
 
-                    if button_response.clicked() {
-                        self.language_dropdown_open = !self.language_dropdown_open;
-                        self.language_filter.clear();
-                    }
+                            if button_response.clicked() {
+                                self.language_dropdown_open = !self.language_dropdown_open;
+                                self.language_filter.clear();
+                            }
 
-                    let anim_t = ui.ctx().animate_bool_with_time(
-                        egui::Id::new("lang_dropdown_anim"),
-                        self.language_dropdown_open,
-                        0.15,
-                    );
+                            let anim_t = ui.ctx().animate_bool_with_time(
+                                egui::Id::new("lang_dropdown_anim"),
+                                self.language_dropdown_open,
+                                0.15,
+                            );
 
-                    if anim_t > 0.0 {
-                        let popup_pos = button_response.rect.left_bottom() + egui::vec2(0.0, 2.0);
+                            if anim_t > 0.0 {
+                                let popup_pos =
+                                    button_response.rect.left_bottom() + egui::vec2(0.0, 2.0);
 
-                        let area_response = egui::Area::new(egui::Id::new("lang_dropdown"))
-                            .fixed_pos(popup_pos)
-                            .order(egui::Order::Foreground)
-                            .interactable(self.language_dropdown_open)
-                            .show(ui.ctx(), |ui| {
-                                egui::Frame::popup(ui.style()).show(ui, |ui| {
-                                    ui.set_opacity(anim_t);
-                                    ui.set_min_width(220.0);
+                                let area_response = egui::Area::new(egui::Id::new("lang_dropdown"))
+                                    .fixed_pos(popup_pos)
+                                    .order(egui::Order::Foreground)
+                                    .interactable(self.language_dropdown_open)
+                                    .show(ui.ctx(), |ui| {
+                                        egui::Frame::popup(ui.style()).show(ui, |ui| {
+                                            ui.set_opacity(anim_t);
+                                            ui.set_min_width(220.0);
 
-                                    ui.add(
-                                        egui::TextEdit::singleline(&mut self.language_filter)
-                                            .hint_text("Rechercher...")
-                                            .desired_width(220.0),
-                                    );
-                                    ui.add_space(4.0);
-                                    ui.separator();
-                                    ui.add_space(4.0);
+                                            ui.add(
+                                                egui::TextEdit::singleline(
+                                                    &mut self.language_filter,
+                                                )
+                                                .hint_text("Rechercher...")
+                                                .desired_width(220.0),
+                                            );
+                                            ui.add_space(4.0);
+                                            ui.separator();
+                                            ui.add_space(4.0);
 
-                                    let filter = self.language_filter.to_lowercase();
-                                    let mut picked: Option<String> = None;
+                                            let filter = self.language_filter.to_lowercase();
+                                            let mut picked: Option<String> = None;
 
-                                    egui::ScrollArea::vertical()
-                                        .max_height(150.0)
-                                        .show(ui, |ui| {
-                                            let mut found = false;
-                                            for lang in &self.languages {
-                                                if filter.is_empty()
-                                                    || lang.to_lowercase().contains(&filter)
-                                                {
-                                                    found = true;
-                                                    if ui.selectable_label(false, lang).clicked() {
-                                                        picked = Some(lang.clone());
+                                            egui::ScrollArea::vertical().max_height(150.0).show(
+                                                ui,
+                                                |ui| {
+                                                    let mut found = false;
+                                                    for lang in &self.languages {
+                                                        if filter.is_empty()
+                                                            || lang.to_lowercase().contains(&filter)
+                                                        {
+                                                            found = true;
+                                                            if ui
+                                                                .selectable_label(false, lang)
+                                                                .clicked()
+                                                            {
+                                                                picked = Some(lang.clone());
+                                                            }
+                                                        }
                                                     }
-                                                }
-                                            }
-                                            if !found {
-                                                ui.weak("Aucun résultat");
+                                                    if !found {
+                                                        ui.weak("Aucun résultat");
+                                                    }
+                                                },
+                                            );
+
+                                            if let Some(l) = picked {
+                                                self.new_language = l;
+                                                self.language_filter.clear();
+                                                self.language_dropdown_open = false;
                                             }
                                         });
+                                    });
 
-                                    if let Some(l) = picked {
-                                        self.new_language = l;
-                                        self.language_filter.clear();
-                                        self.language_dropdown_open = false;
-                                    }
-                                });
-                            });
-
-                        if self.language_dropdown_open
-                            && ui.input(|i| i.pointer.any_click())
-                            && !area_response.response.contains_pointer()
-                            && !button_response.hovered()
-                        {
-                            self.language_dropdown_open = false;
-                        }
-                    }
-
-                    ui.add_space(6.0);
-
-                    ui.label("Code");
-                    let code_edit_id = egui::Id::new("new_code_editor");
-
-                    handle_auto_close(ui, code_edit_id, &mut self.new_code);
-
-                    ui.add(
-                        egui::TextEdit::multiline(&mut self.new_code)
-                            .id(code_edit_id)
-                            .desired_rows(10)
-                            .desired_width(ui.available_width()),
-                    );
-                    ui.add_space(6.0);
-
-                    ui.label("Description");
-                    ui.add_sized(
-                        [ui.available_width(), 22.0],
-                        egui::TextEdit::singleline(&mut self.new_description),
-                    );
-                    ui.add_space(10.0);
-
-                    if let Some(err) = &self.add_error {
-                        ui.colored_label(egui::Color32::RED, err);
-                        ui.add_space(4.0);
-                    }
-
-                    ui.horizontal(|ui| {
-                        let action_label = if self.editing_id.is_some() {
-                            "Enregistrer"
-                        } else {
-                            "Ajouter"
-                        };
-
-                        if ui.button(action_label).clicked() {
-                            let title = self.new_title.trim();
-                            let language = self.new_language.trim();
-                            let code = self.new_code.trim();
-                            let description = self.new_description.trim();
-
-                            if title.is_empty()
-                                || language.is_empty()
-                                || code.is_empty()
-                                || description.is_empty()
-                            {
-                                self.add_error =
-                                    Some("Tous les champs sont obligatoires.".to_string());
-                            } else {
-                                if let Some(id) = self.editing_id {
-                                    update_snippet(
-                                        &self.conn,
-                                        id,
-                                        title,
-                                        language,
-                                        code,
-                                        description,
-                                    )
-                                    .expect("Échec de l'édition");
-
-                                    if let Some(other_id) = self.merging_with {
-                                        delete_snippet(&self.conn, other_id)
-                                            .expect("Échec suppression doublon");
-                                        self.merging_with = None;
-                                    }
-                                } else {
-                                    insert_snippet(&self.conn, title, language, code, description)
-                                        .expect("Échec de l'insertion");
+                                if self.language_dropdown_open
+                                    && ui.input(|i| i.pointer.any_click())
+                                    && !area_response.response.contains_pointer()
+                                    && !button_response.hovered()
+                                {
+                                    self.language_dropdown_open = false;
                                 }
-
-                                self.snippets =
-                                    load_all_snippets(&self.conn).expect("Échec du rechargement");
-
-                                self.new_title.clear();
-                                self.new_language.clear();
-                                self.new_code.clear();
-                                self.new_description.clear();
-
-                                self.add_error = None;
-                                close_requested = true;
                             }
-                        }
-                        if ui.button("Annuler").clicked() {
-                            self.add_error = None;
-                            self.editing_id = None;
-                            self.merging_with = None;
-                            self.new_title.clear();
-                            self.new_language.clear();
-                            self.new_code.clear();
-                            self.new_description.clear();
-                            close_requested = true;
-                        }
-                    });
+
+                            ui.add_space(6.0);
+
+                            ui.label("Code");
+                            let code_edit_id = egui::Id::new("new_code_editor");
+
+                            handle_auto_close(ui, code_edit_id, &mut self.new_code);
+
+                            ui.add(
+                                egui::TextEdit::multiline(&mut self.new_code)
+                                    .id(code_edit_id)
+                                    .desired_rows(10)
+                                    .desired_width(ui.available_width()),
+                            );
+                            ui.add_space(6.0);
+
+                            ui.label("Description");
+                            ui.add_sized(
+                                [ui.available_width(), 22.0],
+                                egui::TextEdit::singleline(&mut self.new_description),
+                            );
+                            ui.add_space(10.0);
+
+                            if let Some(err) = &self.add_error {
+                                ui.colored_label(egui::Color32::RED, err);
+                                ui.add_space(4.0);
+                            }
+
+                            ui.horizontal(|ui| {
+                                let action_label = if self.editing_id.is_some() {
+                                    "Enregistrer"
+                                } else {
+                                    "Ajouter"
+                                };
+
+                                if ui.button(action_label).clicked() {
+                                    let title = self.new_title.trim();
+                                    let language = self.new_language.trim();
+                                    let code = self.new_code.trim();
+                                    let description = self.new_description.trim();
+
+                                    if title.is_empty()
+                                        || language.is_empty()
+                                        || code.is_empty()
+                                        || description.is_empty()
+                                    {
+                                        self.add_error =
+                                            Some("Tous les champs sont obligatoires.".to_string());
+                                    } else {
+                                        if let Some(id) = self.editing_id {
+                                            update_snippet(
+                                                &self.conn,
+                                                id,
+                                                title,
+                                                language,
+                                                code,
+                                                description,
+                                            )
+                                            .expect("Échec de l'édition");
+
+                                            if let Some(other_id) = self.merging_with {
+                                                delete_snippet(&self.conn, other_id)
+                                                    .expect("Échec suppression doublon");
+                                                self.merging_with = None;
+                                            }
+                                        } else {
+                                            insert_snippet(
+                                                &self.conn,
+                                                title,
+                                                language,
+                                                code,
+                                                description,
+                                            )
+                                            .expect("Échec de l'insertion");
+                                        }
+
+                                        self.snippets = load_all_snippets(&self.conn)
+                                            .expect("Échec du rechargement");
+
+                                        self.new_title.clear();
+                                        self.new_language.clear();
+                                        self.new_code.clear();
+                                        self.new_description.clear();
+
+                                        self.add_error = None;
+                                        close_requested = true;
+                                    }
+                                }
+                                if ui.button("Annuler").clicked() {
+                                    self.add_error = None;
+                                    self.editing_id = None;
+                                    self.merging_with = None;
+                                    self.new_title.clear();
+                                    self.new_language.clear();
+                                    self.new_code.clear();
+                                    self.new_description.clear();
+                                    close_requested = true;
+                                }
+                            });
+                        });
                 });
 
             if close_requested || !open {
