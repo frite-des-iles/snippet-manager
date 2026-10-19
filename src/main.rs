@@ -2,14 +2,14 @@
 // IMPORTS
 // ═══════════════════════════════════════════════════════════════════════
 use arboard::Clipboard;
-use eframe::{Frame, egui};
+use chrono::TimeZone;
+use chrono::prelude::Local;
+use eframe::{Frame, egui, egui::text::CharIndex};
 use rfd::FileDialog;
 use rusqlite::{Connection, Result, params};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
-use chrono::prelude::Local;
-use chrono::TimeZone;
 
 // ═══════════════════════════════════════════════════════════════════════
 // ÉTAT DE L'APPLICATION
@@ -157,7 +157,6 @@ fn export_data(
     Ok(())
 }
 
-
 fn import_data(
     conn: &Connection,
     path: impl AsRef<std::path::Path>,
@@ -233,6 +232,76 @@ fn find_duplicates(snippets: &[Snippet]) -> Vec<(i64, i64)> {
     }
 
     pairs
+}
+
+fn handle_auto_close(
+    ui: &mut egui::Ui,
+    text_edit_id: egui::Id,
+    text: &mut String,
+) {
+    let mut typed_char = None;
+    ui.input_mut(|i| {
+        for idx in (0..i.events.len()).rev() {
+            if let egui::Event::Text(t) = &i.events[idx] {
+                if t.chars().count() == 1 {
+                    let c = t.chars().next().unwrap();
+                    if "()[]{}".contains(c) {
+                        typed_char = Some(c);
+                        i.events.remove(idx);
+                    }
+                }
+            }
+        }
+    });
+
+    let c = match typed_char {
+        Some(c) => c,
+        None => return,
+    };
+
+    let (open, close) = match c {
+        '(' => (Some('('), Some(')')),
+        '[' => (Some('['), Some(']')),
+        '{' => (Some('{'), Some('}')),
+        ')' => (None, Some(')')),
+        ']' => (None, Some(']')),
+        '}' => (None, Some('}')),
+        _ => return,
+    };
+
+    if let Some(mut state) = egui::text_edit::TextEditState::load(ui.ctx(), text_edit_id) {
+        if let Some(range) = state.cursor.char_range() {
+            let idx_usize = usize::from(range.primary.index);
+            let chars: Vec<char> = text.chars().collect();
+
+            if let Some(open_char) = open {
+                // CAS A : Ouverture. On insère la paire complète.
+                let byte_idx: usize = text.chars().take(idx_usize).map(|ch| ch.len_utf8()).sum();
+                text.insert(byte_idx, open_char);
+                text.insert(byte_idx + open_char.len_utf8(), close.unwrap());
+
+                state.cursor.set_char_range(Some(egui::text::CCursorRange::one(
+                    egui::text::CCursor::new(CharIndex::from(idx_usize + 1)),
+                )));
+                state.store(ui.ctx(), text_edit_id);
+            } else if let Some(close_char) = close {
+                if idx_usize < chars.len() && chars[idx_usize] == close_char {
+                    state.cursor.set_char_range(Some(egui::text::CCursorRange::one(
+                        egui::text::CCursor::new(CharIndex::from(idx_usize + 1)),
+                    )));
+                    state.store(ui.ctx(), text_edit_id);
+                } else {
+                    let byte_idx: usize = text.chars().take(idx_usize).map(|ch| ch.len_utf8()).sum();
+                    text.insert(byte_idx, close_char);
+
+                    state.cursor.set_char_range(Some(egui::text::CCursorRange::one(
+                        egui::text::CCursor::new(CharIndex::from(idx_usize + 1)),
+                    )));
+                    state.store(ui.ctx(), text_edit_id);
+                }
+            }
+        }
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -501,12 +570,10 @@ fn toggle_always_on_top(ui: &egui::Ui, state: &mut bool) {
 }
 
 fn get_setting(conn: &Connection, key: &str) -> Option<String> {
-    conn.query_row(
-        "SELECT value FROM settings WHERE key = ?1",
-        [key],
-        |row| row.get(0),
-    )
-        .ok()
+    conn.query_row("SELECT value FROM settings WHERE key = ?1", [key], |row| {
+        row.get(0)
+    })
+    .ok()
 }
 
 fn set_setting(conn: &Connection, key: &str, value: &str) -> Result<()> {
@@ -578,7 +645,8 @@ impl eframe::App for SnippetApp {
                 ui.horizontal(|ui| {
                     let combo_width = 110.0;
                     let combo_text = self.active_language.as_deref().unwrap_or("Tous");
-                    let combo_response = ui.add_sized([combo_width, 22.0], egui::Button::new(combo_text));
+                    let combo_response =
+                        ui.add_sized([combo_width, 22.0], egui::Button::new(combo_text));
 
                     if combo_response.clicked() {
                         self.top_lang_dropdown_open = !self.top_lang_dropdown_open;
@@ -618,17 +686,29 @@ impl eframe::App for SnippetApp {
                                         .max_height(200.0)
                                         .show(ui, |ui| {
                                             if filter.is_empty() || "tous".contains(&filter) {
-                                                if ui.selectable_label(self.active_language.is_none(), "Tous").clicked() {
+                                                if ui
+                                                    .selectable_label(
+                                                        self.active_language.is_none(),
+                                                        "Tous",
+                                                    )
+                                                    .clicked()
+                                                {
                                                     picked = Some(None);
                                                 }
                                             }
 
                                             let mut found = false;
                                             for lang in &self.languages {
-                                                if filter.is_empty() || lang.to_lowercase().contains(&filter) {
+                                                if filter.is_empty()
+                                                    || lang.to_lowercase().contains(&filter)
+                                                {
                                                     found = true;
-                                                    let is_active = self.active_language.as_ref() == Some(lang);
-                                                    if ui.selectable_label(is_active, lang).clicked() {
+                                                    let is_active =
+                                                        self.active_language.as_ref() == Some(lang);
+                                                    if ui
+                                                        .selectable_label(is_active, lang)
+                                                        .clicked()
+                                                    {
                                                         picked = Some(Some(lang.clone()));
                                                     }
                                                 }
@@ -693,7 +773,8 @@ impl eframe::App for SnippetApp {
                                         ui.set_min_width(140.0);
                                         for mode in SortMod::all() {
                                             let selected = self.sort_mod == mode;
-                                            if ui.selectable_label(selected, mode.label()).clicked() {
+                                            if ui.selectable_label(selected, mode.label()).clicked()
+                                            {
                                                 self.sort_mod = mode;
                                                 self.sort_dropdown_open = false;
                                             }
@@ -909,7 +990,10 @@ impl eframe::App for SnippetApp {
                     ui.set_opacity(add_anim);
 
                     ui.label("Titre");
-                    ui.text_edit_singleline(&mut self.new_title);
+                    ui.add_sized(
+                        [ui.available_width(), 22.0],
+                        egui::TextEdit::singleline(&mut self.new_title),
+                    );
 
                     ui.label("Langage");
 
@@ -995,11 +1079,23 @@ impl eframe::App for SnippetApp {
                     ui.add_space(6.0);
 
                     ui.label("Code");
-                    ui.text_edit_multiline(&mut self.new_code);
+                    let code_edit_id = egui::Id::new("new_code_editor");
+
+                    handle_auto_close(ui, code_edit_id, &mut self.new_code);
+
+                    ui.add(
+                        egui::TextEdit::multiline(&mut self.new_code)
+                            .id(code_edit_id)
+                            .desired_rows(10)
+                            .desired_width(ui.available_width())
+                    );
                     ui.add_space(6.0);
 
                     ui.label("Description");
-                    ui.text_edit_singleline(&mut self.new_description);
+                    ui.add_sized(
+                        [ui.available_width(), 22.0],
+                        egui::TextEdit::singleline(&mut self.new_description),
+                    );
                     ui.add_space(10.0);
 
                     if let Some(err) = &self.add_error {
@@ -1073,7 +1169,6 @@ impl eframe::App for SnippetApp {
                         }
                     });
                 });
-
 
             if close_requested || !open {
                 self.show_add_window = false;
@@ -1459,7 +1554,6 @@ fn main() -> eframe::Result {
             .with_min_inner_size([600.0, 400.0]),
         ..Default::default()
     };
-
 
     eframe::run_native(
         "Snippet Manager",
