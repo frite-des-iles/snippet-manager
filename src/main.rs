@@ -1215,6 +1215,14 @@ impl eframe::App for SnippetApp {
                 .show(ui.ctx(), |ui| {
                     ui.set_opacity(settings_anim);
 
+                    ui.heading("Raccourci clavier");
+                    ui.add_space(6.0);
+                    ui.label("ctrl+T : activer/désactiver le mode always on top");
+
+                    ui.add_space(8.0);
+                    ui.separator();
+                    ui.add_space(8.0);
+
                     ui.heading("Langages");
                     ui.add_space(6.0);
 
