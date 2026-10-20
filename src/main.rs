@@ -1550,7 +1550,11 @@ impl eframe::App for SnippetApp {
 // POINT D'ENTRÉE
 // ═══════════════════════════════════════════════════════════════════════
 fn main() -> eframe::Result {
-    let conn = Connection::open("snippets.db").expect("Impossible d'ouvrir la base");
+    let exe_path = std::env::current_exe().expect("Impossible de trouver l'exécutable");
+    let exe_dir = exe_path.parent().expect("Impossible de trouver le dossier de l'exécutable");
+    let db_path = exe_dir.join("snippets.db");
+
+    let conn = Connection::open(&db_path).expect("Impossible d'ouvrir la base");
 
     init_db(&conn).expect("Impossible de créer la table");
     let _count = count_snippets(&conn).expect("Impossible de compter");
